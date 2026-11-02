@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Swordark</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Cormorant+Garamond:ital,wght@0,500;0,700;1,500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/src/ui/style.css" />
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <canvas id="screenblood"></canvas>
+  <div id="popups"></div>
+
+  <div id="hud" class="hidden">
+    <div id="vitals">
+      <div id="hp"><div id="hp-lag"></div><div id="hp-fill"></div></div>
+      <div id="focus"><div id="focus-fill"></div><i></i><i></i><span>FOCUS · BLOOD ART</span></div>
+    </div>
+    <div id="wave"></div>
+    <div id="combo"><div id="combo-num">0</div><div id="combo-label">HITS</div></div>
+    <div id="boss">
+      <div id="boss-name"></div>
+      <div id="boss-hp"><div id="boss-hp-lag"></div><div id="boss-hp-fill"></div></div>
+      <div id="boss-posture"><div id="boss-posture-fill"></div></div>
+    </div>
+    <div id="banner"><div id="banner-title"></div><div id="banner-sub"></div></div>
+    <div id="prompt"></div>
+    <div id="hint"></div>
+  </div>
+
+  <div id="title" class="screen show">
+    <div class="inner">
+      <h1>SWORDARK</h1>
+      <p class="tag">The Ashgate falls tonight. Carve a path to the Warden.</p>
+      <div class="controls"></div>
+      <p class="start">Click or press <b>✕</b> to begin</p>
+      <p class="note">Headphones recommended · DualSense supported (USB or Bluetooth)</p>
+    </div>
+  </div>
+  <div id="pause" class="screen">
+    <div class="inner">
+      <h2>PAUSED</h2>
+      <div class="controls"></div>
+      <p class="start">Click or press <b>OPTIONS / ESC</b> to resume · <b>R / CREATE</b> restart checkpoint</p>
+    </div>
+  </div>
+  <div id="death" class="screen">
+    <div class="inner">
+      <h2 class="red">SLAIN</h2>
+      <p class="start">Press <b>R</b> / <b>✕</b> to rise again</p>
+    </div>
+  </div>
+  <div id="victory" class="screen">
+    <div class="inner">
+      <h2>THE WARDEN HAS FALLEN</h2>
+      <p class="tag" id="victory-stats"></p>
+      <p class="start">Press <b>R</b> / <b>✕</b> to play again</p>
+    </div>
+  </div>
+  <div id="fps"></div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

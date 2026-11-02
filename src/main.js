@@ -16,7 +16,7 @@ import { input } from './core/input.js';
 import { time } from './core/time.js';
 import { audio } from './core/audio.js';
 import { HUD } from './ui/hud.js';
-import { clamp, damp, rand, pick, lerp } from './core/math.js';
+import { clamp, damp, rand, pick, lerp, segSegDistSq } from './core/math.js';
 
 class Game {
   constructor() {
@@ -185,7 +185,10 @@ class Game {
     const res = enemy.receiveHit(info);
     if (res === 'none') return;
     if (res === 'blocked' || res === 'guardbreak') {
-      const sp = enemy.bladeTip.clone().lerp(point, 0.5);
+      // sparks where the two blades actually cross (or the shield face)
+      const sp = new THREE.Vector3();
+      if (enemy.shield) enemy.shield.getWorldPosition(sp);
+      else { segSegDistSq(player.bladeBase, player.bladeTip, enemy.bladeBase, enemy.bladeTip, _ca1, _cb1); sp.copy(_ca1).lerp(_cb1, 0.5); }
       this.fx.sparksBurst(sp, dir.clone().negate(), res === 'guardbreak' ? 45 : 24, 7);
       this.fx.flash(sp, 0.45, 0.08);
       audio.play(res === 'guardbreak' ? 'parry' : 'clash', { pos: point, rate: res === 'guardbreak' ? 0.8 : 1 });
@@ -306,56 +309,90 @@ class Game {
     audio.play('gore_spurt', { pos: p });
   }
 
-  enemyStrike(enemy, clip) {
+  // An enemy swing only lands if its blade actually sweeps into the player (or into a raised guard).
+  // Called every frame of the swing's active window; returns null until contact.
+  enemyBladeSweep(enemy, clip) {
     const p = this.player;
-    if (!p.alive) return;
-    const d = enemy.distTo(p);
-    const reach = (clip.reach || 2) + p.body.radius;
-    const ang = Math.abs(enemy.angleTo(p));
-    const dy = p.body.pos.y - enemy.body.pos.y;
-    if (d > reach || ang > (clip.arc || 1.2) / 2 + 0.3 || dy > 1.4 || dy < -1.0) return 'miss';
+    if (!p.alive) return 'miss';
     const per = clip.perilous;
-    if (per === 'sweep' && p.body.pos.y - p.body.groundY > 0.3) return 'miss';
+    const unblock = !!clip.unblockable || per === 'sweep' || per === 'spin';
+    const guarding = !unblock && (p.state === 'parry' || p.state === 'block' || p.state === 'deflect');
+    const pp = p.body.pos;
+    _sa1.set(pp.x, pp.y + 0.25, pp.z);
+    _sb1.set(pp.x, pp.y + 1.75, pp.z);
+    const bodyR = 0.32;
+    // guard volume: in front of the chest, where the parrying blade is
+    p.forward(_gf);
+    _gc.set(pp.x + _gf.x * 0.36, pp.y + 1.25, pp.z + _gf.z * 0.36);
+    const gR = 0.46;
+    let hitS = -1, kind = null;
+    for (let k = 0; k <= 6; k++) {
+      const s = k / 6;
+      _bb.lerpVectors(enemy.prevBase, enemy.bladeBase, s);
+      _bt.lerpVectors(enemy.prevTip, enemy.bladeTip, s);
+      if (guarding && distPointSeg(_gc, _bb, _bt) < gR) { hitS = s; kind = 'guard'; closestOnSeg(_gc, _bb, _bt, _contact); break; }
+      if (segSegDistSq(_bb, _bt, _sa1, _sb1, _ca1, _cb1) < bodyR * bodyR) { hitS = s; kind = 'body'; _contact.copy(_ca1); break; }
+    }
+    if (hitS < 0) return null;
+    // jumped clean over a low sweep
+    if (per === 'sweep' && pp.y - p.body.groundY > 0.3) return null;
+    enemy.rewindToContact(hitS);
+    // for steel-on-steel, meet the blade where it is drawn this frame so the freeze shows real contact
+    if (kind === 'guard' || guarding) closestOnSeg(_gc, enemy.bladeBase, enemy.bladeTip, _contact);
+    const travel = _tv.subVectors(enemy.bladeTip, enemy.prevTip);
+    if (travel.lengthSq() < 1e-6) enemy.forward(travel);
+    travel.normalize();
     const info = {
-      dmg: clip.dmg, perilous: per, heavy: clip.dmg >= 24 || enemy.type === 'brute',
-      unblockable: !!clip.unblockable || per === 'sweep' || per === 'spin',
+      dmg: clip.dmg, perilous: per, heavy: clip.dmg >= 24 || enemy.type === 'brute', unblockable: unblock,
       parryWindow: enemy.parryWindow(), chip: enemy.isBoss ? 0.25 : 0.15,
+      contact: _contact.clone(), edir: travel.clone(), kind,
     };
+    return this.resolveStrike(enemy, clip, info);
+  }
+
+  resolveStrike(enemy, clip, info) {
+    const p = this.player;
     const res = p.receiveStrike(enemy, info);
-    const contact = new THREE.Vector3().lerpVectors(enemy.bladeTip, p.center(new THREE.Vector3()), 0.45);
+    const contact = info.contact;
     if (res === 'parried') {
       enemy.parried();
       this.stats.parries++;
       this.hud.popup('PARRY', contact, '#fff2c8', 0.7);
-      const n = new THREE.Vector3().subVectors(enemy.body.pos, p.body.pos).normalize();
-      this.fx.sparksBurst(contact, n, 55, 10, 1.3);
-      this.fx.flash(contact, 1.1, 0.14);
+      const n = info.edir.clone().negate().add(new THREE.Vector3(0, 0.4, 0)).normalize();
+      this.fx.sparksBurst(contact, n, 60, 10, 1.3);
+      this.fx.flash(contact, 0.42, 0.12);
+      this.fx.slashFlash(contact, new THREE.Vector3().crossVectors(info.edir, new THREE.Vector3(0, 1, 0)).normalize(), [3.5, 2.6, 1.6], 0.8);
       audio.play('parry', { pos: contact });
-      time.stop(enemy.isBoss ? 0.075 : 0.1);
+      time.stop(enemy.isBoss ? 0.1 : 0.13);
       if (!enemy.isBoss) time.slow(0.35, 0.22, 5);
-      this.camRig.shake(0.2);
+      this.camRig.shake(0.22);
       this.camRig.zoomKick(-3);
+      this.camRig.punch(info.edir, 0.05);
       input.rumble(1, 0.5, 130);
-      this.fxState.flash = 0.12;
+      this.fxState.flash = 0.1;
       p.combo++; p.comboTimer = 2.4; this.hud.comboHit(p.combo);
     } else if (res === 'blocked') {
-      this.fx.sparksBurst(contact, new THREE.Vector3().subVectors(enemy.body.pos, p.body.pos).normalize(), 18, 6);
+      this.fx.sparksBurst(contact, info.edir.clone().negate(), 22, 6);
+      this.fx.flash(contact, 0.3, 0.08);
       audio.play('block', { pos: contact });
-      time.stop(0.05);
-      this.camRig.shake(0.15);
+      time.stop(0.07);
+      this.camRig.shake(0.16);
       input.rumble(0.5, 0.3, 80);
     } else if (res === 'hit') {
-      const c = p.center(new THREE.Vector3());
-      c.y += 0.2;
-      const dir = new THREE.Vector3().subVectors(p.body.pos, enemy.body.pos).setY(0.3).normalize();
-      this.blood.spray(c, dir, info.heavy ? 60 : 35, 5.5, 0.5);
+      const c = contact.clone();
+      const dir = info.edir.clone().setY(Math.max(0.2, info.edir.y)).normalize();
+      this.blood.spray(c, dir, info.heavy ? 70 : 45, 6, 0.45, 1.2);
       p.rig.addBlood(c, info.heavy ? 0.15 : 0.11);
+      p.rig.material.userData.uniforms.uHitFlash.value = 0.5;
+      this.fx.slashFlash(c, info.edir, [3, 0.5, 0.35], 1);
       audio.play(info.heavy ? 'flesh_heavy' : 'flesh', { pos: c });
-      time.stop(info.heavy ? 0.1 : 0.07);
+      time.stop(info.heavy ? 0.12 : 0.09);
       this.camRig.shake(info.heavy ? 0.5 : 0.35);
+      this.camRig.punch(info.edir, 0.08);
       this.fxState.damage = 0.75;
       this.fxState.ca = 1.2;
       input.rumble(1, 1, info.heavy ? 260 : 160);
+      if (p.alive && info.heavy) this.hud.screenBlood(0.3);
     }
     return res;
   }
@@ -560,7 +597,7 @@ class Game {
     const boss = enemy.isBoss;
     let variant;
     if (boss) variant = enemy.state === 'finished' ? 'decap' : 'split';
-    else variant = pick(['decap', 'decap', 'impale', 'split']);
+    else variant = enemy.type === 'brute' ? pick(['impale', 'split']) : pick(['decap', 'decap', 'impale', 'split']);
     const clip = { decap: PLAYER.execDecap, impale: PLAYER.execImpale, split: PLAYER.execSplit }[variant];
     enemy.cancelAttack();
     enemy.setState('victim');
@@ -602,7 +639,18 @@ class Game {
       p.yaw = p.yawTo(e.body.pos.x, e.body.pos.z);
       const ct = p.anim.clipT;
       p.trailOn = !ex.hit ? ct > clip.hitAt - 0.08 : ct < clip.hitAt + 0.1;
-      if (!ex.hit && ct >= clip.hitAt) { ex.hit = true; this.executionHit(ex); }
+      // the finishing blow lands when the blade actually reaches the neck / chest / skull
+      if (!ex.hit && ct >= clip.hitAt - 0.1) {
+        const bone = e.rig.bones[ex.variant === 'decap' ? 'neck' : ex.variant === 'impale' ? 'chest' : 'head'];
+        bone.getWorldPosition(_exb);
+        let d = 9;
+        for (let k = 0; k <= 6; k++) {
+          _bb.lerpVectors(p.prevBase, p.bladeBase, k / 6);
+          _bt.lerpVectors(p.prevTip, p.bladeTip, k / 6);
+          d = Math.min(d, distPointSeg(_exb, _bb, _bt));
+        }
+        if (d < 0.14 || ct >= clip.hitAt + 0.08) { ex.hit = true; this.executionHit(ex); }
+      }
       if (ex.variant === 'impale' && ex.hit && !ex.kicked && ct >= clip.kickAt) {
         ex.kicked = true;
         const dir = p.forward(new THREE.Vector3());
@@ -897,12 +945,20 @@ class Game {
   }
 }
 
+function closestOnSeg(p, a, b, out) {
+  const ab = _ab.subVectors(b, a);
+  const t = clamp(_ap.subVectors(p, a).dot(ab) / Math.max(1e-8, ab.lengthSq()), 0, 1);
+  return out.copy(a).addScaledVector(ab, t);
+}
 function distPointSeg(p, a, b) {
   const ab = _ab.subVectors(b, a);
   const t = clamp(_ap.subVectors(p, a).dot(ab) / ab.lengthSq(), 0, 1);
   return _cp.copy(a).addScaledVector(ab, t).distanceTo(p);
 }
 const _ab = new THREE.Vector3(), _ap = new THREE.Vector3(), _cp = new THREE.Vector3();
+const _sa1 = new THREE.Vector3(), _sb1 = new THREE.Vector3(), _ca1 = new THREE.Vector3(), _cb1 = new THREE.Vector3();
+const _gf = new THREE.Vector3(), _gc = new THREE.Vector3(), _bb = new THREE.Vector3(), _bt = new THREE.Vector3();
+const _contact = new THREE.Vector3(), _tv = new THREE.Vector3(), _exb = new THREE.Vector3();
 void lerp;
 
 window.game = new Game();

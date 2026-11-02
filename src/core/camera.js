@@ -93,6 +93,12 @@ export class CameraRig {
     if (this.cine) {
       pos.lerp(this.cine.pos, this.cineBlend);
       look.lerp(this.cine.look, this.cineBlend);
+      const R = this.world.ring;
+      if (R) {
+        // keep cinematic angles inside the arena wall
+        const dx = pos.x - R.cx, dz = pos.z - R.cz, d = Math.hypot(dx, dz), lim = R.r - 0.6;
+        if (d > lim) { pos.x = R.cx + dx / d * lim; pos.z = R.cz + dz / d * lim; }
+      }
     }
 
     // shake

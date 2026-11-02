@@ -6,10 +6,10 @@ import { clamp, damp, dampAngle, rand, pick, wrapAngle, ease } from '../core/mat
 import { RAMPART_Y } from '../world/level.js';
 
 export const TYPES = {
-  grunt: { look: 'grunt', hp: 100, sword: 'grunt', scale: 1.0, speed: 4.8, parryWindow: 0.32, attacks: ['slash', 'slash', 'thrust', 'combo'] },
-  shield: { look: 'shield', hp: 130, sword: 'grunt', scale: 1.02, speed: 4.2, parryWindow: 0.32, shield: true, attacks: ['slash', 'thrust'] },
-  thrower: { look: 'thrower', hp: 60, sword: 'knife', scale: 0.97, speed: 5.2, parryWindow: 0.3, ranged: true, attacks: ['slash'] },
-  brute: { look: 'brute', hp: 340, sword: 'brute', scale: 1.24, speed: 3.6, parryWindow: 0.3, armor: true, attacks: ['overhead', 'sweep', 'sweep'] },
+  grunt: { look: 'grunt', hp: 130, sword: 'grunt', scale: 1.0, speed: 4.8, parryWindow: 0.32, attacks: ['slash', 'slash', 'thrust', 'combo'] },
+  shield: { look: 'shield', hp: 150, sword: 'grunt', scale: 1.02, speed: 4.2, parryWindow: 0.32, shield: true, attacks: ['slash', 'thrust'] },
+  thrower: { look: 'thrower', hp: 70, sword: 'knife', scale: 0.97, speed: 5.2, parryWindow: 0.3, ranged: true, attacks: ['slash'] },
+  brute: { look: 'brute', hp: 380, sword: 'brute', scale: 1.24, speed: 3.6, parryWindow: 0.3, armor: true, attacks: ['overhead', 'sweep', 'sweep'] },
 };
 
 let indicatorTex = null;
@@ -339,6 +339,7 @@ export class Enemy extends Character {
     this.armored = false;
     this.clip = clip;
     this.struck = false;
+    this.struck2 = false;
     this.whooshed = false;
     this.setState('attack');
     this.anim.playClip(clip, { blendIn: 0.08, speed });
@@ -361,8 +362,9 @@ export class Enemy extends Character {
     if (clip.lunge && t >= clip.lunge[0] && t <= clip.lunge[1]) {
       const span = clip.lunge[1] - clip.lunge[0];
       const u = (t - clip.lunge[0]) / span;
-      let v = (clip.lunge[2] / span) * (Math.PI / 2) * Math.cos(u * Math.PI / 2) * this.anim.clipSpeed;
-      if (this.distTo(p) < 1.1) v = 0;
+      // step in to the distance where this swing's arc passes through the target
+      const remain = Math.max(0.05, (clip.lunge[1] - t) / this.anim.clipSpeed);
+      const v = clamp((this.distTo(p) - (clip.range ?? 1.2)) / remain, -2.5, 9) * Math.min(1, u * 4 + 0.3);
       b.vel.x = Math.sin(this.yaw) * v;
       b.vel.z = Math.cos(this.yaw) * v;
     } else {
@@ -374,12 +376,16 @@ export class Enemy extends Character {
       this.whooshed = true;
       g.audio.play(this.type === 'brute' ? 'whoosh_heavy' : 'whoosh_light', { pos: b.pos, rate: this.type === 'brute' ? 0.8 : 1 });
     }
-    if (!this.struck && t >= clip.hitAt) {
-      this.struck = true;
-      g.enemyStrike(this, clip);
+    // the swing connects only if the blade reaches you during its active window
+    if (!this.struck && t >= clip.hitAt - 0.05) {
+      const r = t <= clip.hitAt + 0.11 ? g.enemyBladeSweep(this, clip) : null;
+      if (r || t > clip.hitAt + 0.11) this.struck = true;
       if (this.state !== 'attack') return;
     }
-    if (clip.hitAt2 && !this.struck2 && t >= clip.hitAt2) { this.struck2 = true; g.enemyStrike(this, clip); }
+    if (clip.hitAt2 && !this.struck2 && t >= clip.hitAt2 - 0.05) {
+      const r = t <= clip.hitAt2 + 0.11 ? g.enemyBladeSweep(this, clip) : null;
+      if (r || t > clip.hitAt2 + 0.11) this.struck2 = true;
+    }
     if (this.comboNext && t >= clip.hitAt + 0.06) {
       const next = this.comboNext;
       this.comboNext = null;
@@ -467,6 +473,7 @@ export class Enemy extends Character {
     this.comboTaken = (this.comboTaken || 0) + 1;
     this.lastHitT = now;
     if (info.counter) info.dmg *= 1.5;
+    if (this.armored && light) info.dmg *= 0.4; // bracing through a riposte
     this.takeDamage(info);
     if (!this.alive) return 'killed';
     return 'hit';

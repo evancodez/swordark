@@ -144,10 +144,16 @@ export class Character {
   animate(dt) {
     if (this.ragdoll && this.ragdoll.active) { this.ragdoll.update(dt); return; }
     if (this.ragdoll) return;
-    this.anim.update(dt, this);
+    // a hit-stop triggered earlier this frame freezes animation immediately (keeps contact poses on screen)
+    this.anim.update(this.game.time.hitstop > 0 ? dt * 0.03 : dt, this);
     // blade tracking for trails + hit sweeps
     this.prevBase.copy(this.bladeBase);
     this.prevTip.copy(this.bladeTip);
+    // clip time at which each blade sample was taken (lets hits rewind to the exact contact)
+    this.prevBladeClip = this.bladeClip;
+    this.prevBladeClipT = this.bladeClipT;
+    this.bladeClip = this.anim.clip;
+    this.bladeClipT = this.anim.clip ? this.anim.clipT : 0;
     if (this.anim.bladeSegment(this.bladeBase, this.bladeTip)) {
       if (this._bladeInit !== true) { this.prevBase.copy(this.bladeBase); this.prevTip.copy(this.bladeTip); this._bladeInit = true; }
       if (this.trailOn) this.trail.push(this.bladeBase, this.bladeTip, this.game.time.game);
@@ -181,6 +187,13 @@ export class Character {
       radius: 0.03, bounce: 0.3, life: 30,
       onHit: (d, s) => { if (s > 3) this.game.audio.play('clash', { pos: d.obj.position, volume: 0.35, rate: 1.3 }); },
     });
+  }
+
+  // rewind the current clip to fraction s between the last two blade samples (contact frame)
+  rewindToContact(s) {
+    if (this.anim.clip && this.bladeClip === this.anim.clip && this.prevBladeClip === this.anim.clip) {
+      this.anim.clipT = this.prevBladeClipT + (this.bladeClipT - this.prevBladeClipT) * s;
+    }
   }
 
   dispose() {

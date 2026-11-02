@@ -84,3 +84,17 @@ h2.red { color: var(--red-hi); text-shadow: 0 0 40px rgba(255,0,0,.5); }
 #focus i:nth-of-type(2) { left: 66.6%; }
 #focus.denied { animation: deny .3s; }
 @keyframes deny { 0%, 100% { transform: none; } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+
+#lockon { position: fixed; left: 0; top: 0; pointer-events: none; opacity: 0; transition: opacity .15s; will-change: transform; }
+#lockon.show { opacity: 1; }
+#lockon .diamond { width: 12px; height: 12px; margin: 0 auto; border: 2px solid #f2e6d0; transform: rotate(45deg); box-shadow: 0 0 8px rgba(0,0,0,.8); }
+#lockon.guard .diamond { border-color: #ffb347; }
+#lockon.open .diamond { border-color: #ff4a3a; background: rgba(255,60,40,.35); }
+#lockon .lhp { width: 64px; height: 4px; margin: 6px auto 0; background: rgba(0,0,0,.6); }
+#lockon .lhp-fill { height: 100%; background: #b3131b; transform-origin: left; }
+#lockon .ltag { font-family: Cinzel, serif; font-size: 10px; letter-spacing: .25em; text-align: center; margin-top: 3px; color: #ffb347; text-shadow: 0 1px 4px #000; white-space: nowrap; }
+
+#threats { position: fixed; inset: 0; pointer-events: none; }
+.threat { position: absolute; left: 0; top: 0; width: 0; height: 0; border-left: 12px solid transparent; border-right: 12px solid transparent; border-bottom: 22px solid #ffd27a; filter: drop-shadow(0 0 6px rgba(255,180,80,.9)); }
+.threat.red { border-bottom-color: #ff3b30; filter: drop-shadow(0 0 6px rgba(255,40,30,.9)); }
+.threat.now { border-bottom-color: #fff8e8; }

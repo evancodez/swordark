@@ -19,7 +19,7 @@ export const PLAYER = {
       { t: 0.19, g: [0.44, 1.16, 0.3], b: [0.95, -0.15, -0.25], l: [0.38, 1.05, -0.15], tw: 0.6, ln: 0.22, sd: 0.05, hy: -0.14, e: 'out' },
       { t: 0.42, g: [0.12, 1.05, 0.38], b: [0.65, 0.25, 0.7], l: [0.25, 1.05, 0.05], tw: 0.25, ln: 0.1, hy: -0.1, e: 'inOut' },
     ],
-    hit: [0.105, 0.195], cancel: 0.2, lunge: [0.02, 0.17, 0.7], dmg: 26, knock: 1.6, dir: [1, 0, 0.15], sweep: 'R2L',
+    hit: [0.105, 0.195], cancel: 0.2, lunge: [0.02, 0.17, 0.7], dmg: 20, knock: 1.6, dir: [1, 0, 0.15], sweep: 'R2L',
   }),
   // backhand rising, left -> right
   l2: c({
@@ -30,7 +30,7 @@ export const PLAYER = {
       { t: 0.185, g: [-0.46, 1.56, 0.18], b: [-0.82, 0.5, -0.3], l: [0.32, 1.0, -0.15], tw: -0.55, ln: -0.04, hy: -0.08, e: 'out' },
       { t: 0.42, g: [-0.26, 1.22, 0.3], b: [-0.2, 0.62, 0.75], tw: -0.25, hy: -0.08, e: 'inOut' },
     ],
-    hit: [0.1, 0.19], cancel: 0.19, lunge: [0.02, 0.16, 0.65], dmg: 26, knock: 1.6, dir: [-1, 0.3, 0.1], sweep: 'L2R',
+    hit: [0.1, 0.19], cancel: 0.19, lunge: [0.02, 0.16, 0.65], dmg: 20, knock: 1.6, dir: [-1, 0.3, 0.1], sweep: 'L2R',
   }),
   // overhead diagonal down
   l3: c({
@@ -41,7 +41,7 @@ export const PLAYER = {
       { t: 0.21, g: [0.3, 0.8, 0.36], b: [0.5, -0.82, 0.2], l: [0.4, 1.0, -0.1], tw: 0.45, ln: 0.48, hy: -0.22, e: 'out' },
       { t: 0.48, g: [0.0, 1.0, 0.4], b: [0.4, 0.3, 0.85], tw: 0.15, ln: 0.12, hy: -0.12, e: 'inOut' },
     ],
-    hit: [0.125, 0.215], cancel: 0.22, lunge: [0.03, 0.18, 0.8], dmg: 30, knock: 2.0, dir: [0.4, -0.8, 0.3], sweep: 'DOWN',
+    hit: [0.125, 0.215], cancel: 0.22, lunge: [0.03, 0.18, 0.8], dmg: 24, knock: 2.0, dir: [0.4, -0.8, 0.3], sweep: 'DOWN',
   }),
   // spinning finisher (body yaw spins 360 clockwise)
   l4: c({
@@ -54,7 +54,7 @@ export const PLAYER = {
       { t: 0.72, ...GUARD, e: 'inOut' },
     ],
     hit: [0.12, 0.38], cancel: 0.46, lunge: [0.05, 0.3, 1.2], spin: [0.12, 0.36, -Math.PI * 2], hop: 3.2,
-    dmg: 34, knock: 4.5, dir: [1, 0.1, 0], sweep: 'SPIN', wide: true,
+    dmg: 30, knock: 4.5, dir: [1, 0.1, 0], sweep: 'SPIN', wide: true,
   }),
   // straight thrust (used for long-range dashes)
   thrust: c({
@@ -65,7 +65,7 @@ export const PLAYER = {
       { t: 0.24, g: [-0.06, 1.24, 0.78], b: [0.04, 0, 1], l: [0.4, 1.15, -0.25], tw: 0.25, ln: 0.32, hy: -0.2, hz: 0.12, e: 'linear' },
       { t: 0.46, ...GUARD, e: 'inOut' },
     ],
-    hit: [0.1, 0.2], cancel: 0.22, lunge: [0.04, 0.15, 0.9], dmg: 30, knock: 2.4, dir: [0, 0, 1], sweep: 'THRUST',
+    hit: [0.1, 0.2], cancel: 0.22, lunge: [0.04, 0.15, 0.9], dmg: 24, knock: 2.4, dir: [0, 0, 1], sweep: 'THRUST',
   }),
   // two-handed overhead cleave
   heavy: c({
@@ -143,7 +143,7 @@ export const PLAYER = {
       { t: 0.18, g: [0.45, 1.05, 0.25], b: [0.9, -0.35, -0.2], tw: 0.6, ln: 0.25, fl: [0.14, 0.35, 0.18], fr: [-0.12, 0.3, -0.1], e: 'out' },
       { t: 0.36, g: [0.1, 1.1, 0.35], b: [0.6, 0.3, 0.7], tw: 0.2, fl: [0.12, 0.35, 0.12], fr: [-0.12, 0.3, -0.08], e: 'inOut' },
     ],
-    hit: [0.09, 0.19], cancel: 0.2, lunge: [0.0, 0.14, 0.5], dmg: 24, knock: 1.5, dir: [1, -0.3, 0.2], sweep: 'R2L', air: true,
+    hit: [0.09, 0.19], cancel: 0.2, lunge: [0.0, 0.14, 0.5], dmg: 19, knock: 1.5, dir: [1, -0.3, 0.2], sweep: 'R2L', air: true,
   }),
   air2: c({
     keys: [
@@ -153,16 +153,16 @@ export const PLAYER = {
       { t: 0.18, g: [-0.45, 1.6, 0.15], b: [-0.8, 0.55, -0.25], tw: -0.55, fl: [0.12, 0.4, 0.12], fr: [-0.12, 0.35, -0.1], e: 'out' },
       { t: 0.36, g: [-0.25, 1.25, 0.3], b: [-0.2, 0.6, 0.75], tw: -0.2, fl: [0.12, 0.35, 0.12], fr: [-0.12, 0.3, -0.08], e: 'inOut' },
     ],
-    hit: [0.09, 0.19], cancel: 0.2, lunge: [0.0, 0.14, 0.5], dmg: 24, knock: 1.5, dir: [-1, 0.4, 0.2], sweep: 'L2R', air: true,
+    hit: [0.09, 0.19], cancel: 0.2, lunge: [0.0, 0.14, 0.5], dmg: 19, knock: 1.5, dir: [-1, 0.4, 0.2], sweep: 'L2R', air: true,
   }),
   // execution: decapitation (horizontal at neck height)
   execDecap: c({
     keys: [
       { t: 0, ...GUARD },
-      { t: 0.32, g: [-0.55, 1.62, -0.1], b: [-0.75, 0.15, -0.65], l: [0.3, 1.35, 0.3], tw: -0.75, ln: -0.05, hy: -0.06, e: 'out' },
-      { t: 0.4, g: [-0.05, 1.58, 0.6], b: [0.25, 0.0, 1], tw: -0.05, ln: 0.12, hy: -0.12, e: 'in' },
-      { t: 0.48, g: [0.5, 1.5, 0.25], b: [0.95, 0.05, -0.3], tw: 0.7, ln: 0.15, hy: -0.14, e: 'out' },
-      { t: 1.05, g: [0.5, 1.48, 0.25], b: [0.95, 0.05, -0.3], tw: 0.7, ln: 0.12, hy: -0.12, e: 'linear' },
+      { t: 0.32, g: [-0.55, 1.5, -0.1], b: [-0.75, 0.12, -0.65], l: [0.3, 1.3, 0.3], tw: -0.75, ln: -0.05, hy: -0.06, e: 'out' },
+      { t: 0.4, g: [-0.05, 1.45, 0.58], b: [0.25, -0.04, 1], tw: -0.05, ln: 0.12, hy: -0.12, e: 'in' },
+      { t: 0.48, g: [0.5, 1.4, 0.25], b: [0.95, 0.0, -0.3], tw: 0.7, ln: 0.15, hy: -0.14, e: 'out' },
+      { t: 1.05, g: [0.5, 1.38, 0.25], b: [0.95, 0.0, -0.3], tw: 0.7, ln: 0.12, hy: -0.12, e: 'linear' },
       { t: 1.35, ...GUARD, e: 'inOut' },
     ],
     hitAt: 0.42, dur: 1.35,
@@ -433,3 +433,15 @@ export const BOSS = {
     ],
   }),
 };
+
+// Ideal attacker->target spacing (m) so the blade arc passes through the body, not the air.
+const RANGES = {
+  PLAYER: { l1: 1.1, l2: 1.1, l3: 1.15, l4: 1.2, thrust: 1.4, heavy: 1.25, kick: 0.95, riposte: 1.1, air1: 1.1, air2: 1.1 },
+  GRUNT: { slash: 1.2, thrust: 1.45, slash2: 1.15 },
+  BRUTE: { overhead: 1.55, sweep: 1.5 },
+  BOSS: { slashR: 1.45, slashL: 1.45, overhead: 1.6, delayed: 1.6, thrust: 1.85, sweep: 1.5, spin: 1.4 },
+};
+for (const [set, map] of Object.entries(RANGES)) {
+  const S = { PLAYER, GRUNT, BRUTE, BOSS }[set];
+  for (const [k, r] of Object.entries(map)) if (S[k]) S[k].range = r;
+}

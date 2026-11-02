@@ -3,6 +3,7 @@ import { Character } from './character.js';
 import { Rig, buildSword } from './rig.js';
 import { Cloth } from './cloth.js';
 import { PLAYER } from './clips.js';
+import { compileClip } from './pose.js';
 import { clamp, damp, dampAngle, lerp, wrapAngle, rand, segSegDistSq, ease } from '../core/math.js';
 
 const GUARD = { g: [-0.2, 1.1, 0.33], b: [0.25, 0.55, 0.8], l: [0.16, 1.14, 0.22], tw: -0.15, hy: -0.03 };
@@ -30,6 +31,11 @@ export class Player extends Character {
       rig.bones.head.add(e);
     }
     this.team = 'player';
+    const step = this.anim.stepCallback;
+    this.anim.stepCallback = (foot, speed) => {
+      step(foot, speed);
+      if (speed > 2.5) game.fx.dustPuff(foot.pos, 2, [0.32, 0.36, 0.42]);
+    };
     this.reset(game.level.spawnPoints.player, Math.PI);
   }
 
@@ -489,7 +495,7 @@ export class Player extends Character {
     const dx = t.body.pos.x - this.body.pos.x, dz = t.body.pos.z - this.body.pos.z;
     const d = Math.hypot(dx, dz);
     this.yaw = dampAngle(this.yaw, Math.atan2(dx, dz), 30, dt);
-    const stopAt = this.dashKind === 'kick' ? 1.15 : 1.4;
+    const stopAt = (this.clip.range ?? 1.15) + 0.25 + (t.rig.scale - 1) * 0.3;
     const speed = Math.max(9, (d - stopAt) / Math.max(0.03, this.dashDur - this.stateT + 0.02));
     const sp = Math.min(speed, 15);
     this.body.vel.x = (dx / d) * sp;
@@ -519,8 +525,11 @@ export class Player extends Character {
       const u = (t - clip.lunge[0]) / span;
       let v = (clip.lunge[2] / span) * (Math.PI / 2) * Math.cos(u * Math.PI / 2) * this.anim.clipSpeed;
       if (this.target && this.target.alive) {
+        // close to the spacing where this swing's arc cuts through the body
         const d = this.distTo(this.target);
-        if (d < 1.15) v = 0;
+        const want = (clip.range ?? 1.15) * (0.85 + 0.15 * this.target.rig.scale) + (this.target.rig.scale - 1) * 0.3;
+        const remain = Math.max(0.05, (clip.lunge[1] - t) / this.anim.clipSpeed);
+        v = clamp((d - want) / remain, -3, 10);
         this.yaw = dampAngle(this.yaw, this.yawTo(this.target.body.pos.x, this.target.body.pos.z), 20, dt);
       } else if (mag > 0.2 && t < (clip.hit ? clip.hit[0] : 0.1)) this.yaw = dampAngle(this.yaw, Math.atan2(mv.x, mv.z), 12, dt);
       b.vel.x = Math.sin(this.yaw) * v;
@@ -584,44 +593,52 @@ export class Player extends Character {
     return grav;
   }
 
-  // blade sweep vs enemies (and breakables)
+  // blade sweep vs enemies: the blade has to actually pass through the body.
   sweepHits(clip, final) {
     const g = this.game;
     const r0b = this.prevBase, r0t = this.prevTip, r1b = this.bladeBase, r1t = this.bladeTip;
+    let firstS = 2;
     for (const e of g.enemies) {
       if (!e.alive || this.hitSet.has(e) || e.state === 'victim' || e.spawning) continue;
       const S = e.rig.scale;
-      _ea.copy(e.body.pos).setY(e.body.pos.y + 0.25 * S);
-      _eb.copy(e.body.pos).setY(e.body.pos.y + 1.75 * S);
-      const rad = e.body.radius + 0.12;
-      let hit = false;
-      for (let k = 0; k <= 3 && !hit; k++) {
-        const s = k / 3;
-        _sa.lerpVectors(r0b, r1b, s);
-        _sb.lerpVectors(r0t, r1t, s);
-        if (segSegDistSq(_sa, _sb, _ea, _eb, _ca, _cb) < rad * rad) hit = true;
-      }
-      // magnetism: the chosen target always gets hit if in reach at the end of the window
-      if (!hit && final && e === this.target) {
-        const d = this.distTo(e);
-        if (d < (clip.kick ? 1.8 : 2.15) && Math.abs(this.angleTo(e)) < 0.75) {
-          hit = true;
-          _ca.copy(this.bladeTip).lerp(this.bladeBase, 0.3);
-          _cb.copy(e.body.pos).setY(e.body.pos.y + 1.2 * S);
+      _ea.copy(e.body.pos).setY(e.body.pos.y + 0.3 * S);
+      _eb.copy(e.body.pos).setY(e.body.pos.y + 1.72 * S);
+      const rad = (clip.kick ? 0.3 : 0.22) * S + 0.03;
+      let hitS = -1, best = 1e9;
+      for (let k = 0; k <= 6; k++) {
+        const s = k / 6;
+        if (clip.kick) {
+          // kicks connect with the foot, not the sword
+          this.rig.bones['shin.R'].getWorldPosition(_sa);
+          this.rig.bones['foot.R'].getWorldPosition(_sb);
+          _sb.addScaledVector(this.forward(_sw), 0.12);
+        } else {
+          _sa.lerpVectors(r0b, r1b, s);
+          _sb.lerpVectors(r0t, r1t, s);
         }
+        const d2 = segSegDistSq(_sa, _sb, _ea, _eb, _ca, _cb);
+        if (d2 < best) { best = d2; _bca.copy(_ca); _bcb.copy(_cb); }
+        if (d2 < rad * rad) { hitS = s; _bca.copy(_ca); _bcb.copy(_cb); break; }
       }
-      if (!hit) continue;
+      // forgiving only for the chosen target, and only when the edge really grazes it
+      if (hitS < 0 && final && e === this.target && best < (rad + 0.22) * (rad + 0.22)) hitS = 1;
+      if (hitS < 0) continue;
       this.hitSet.add(e);
-      // contact point on the body surface (not buried inside the mesh)
-      const off = _sw.subVectors(_ca, _cb);
+      // contact point on the body surface
+      const off = _sw.subVectors(_bca, _bcb);
       const ol = off.length();
-      const point = _pt.copy(_cb);
-      if (ol > 1e-4) point.addScaledVector(off, Math.min(ol, e.body.radius * 0.95) / ol);
-      // swing direction = blade tip velocity
+      const point = _pt.copy(_bcb);
+      if (ol > 1e-4) point.addScaledVector(off, Math.min(ol, rad * 0.9) / ol);
       const dir = _sw.subVectors(r1t, r0t);
       if (dir.lengthSq() < 1e-6 || clip.kick) this.forward(dir);
       dir.normalize();
+      firstS = Math.min(firstS, hitS);
       g.playerHits(this, e, clip, point, dir);
+    }
+    // freeze on the exact frame the steel meets the body
+    if (firstS <= 1 && !clip.kick) {
+      this.rewindToContact(firstS);
+      if (firstS < 1) this.trail.samples.pop(); // don't let the trail fold back over the rewind
     }
     // breakables
     for (const b of g.level.breakables) {
@@ -756,6 +773,35 @@ export class Player extends Character {
     }
     if (this.stateT > 0.32) { this.setState(inp.isHeld('parry') ? 'block' : 'move'); if (this.state === 'block') this.anim.playClip(PLAYER.block, { blendIn: 0.08 }); else this.anim.stopClip(0.2); }
   }
+  // Snap our blade onto the point where the enemy's steel arrives, then throw it off.
+  meetBlade(contactW, edirW, deflect) {
+    this.rig.root.rotation.set(0, this.yaw, 0);
+    this.rig.root.updateMatrixWorld(true);
+    const C = this.rig.root.worldToLocal(_mc.copy(contactW));
+    const E = edirW ? _me.copy(edirW).transformDirection(_mi.copy(this.rig.root.matrixWorld).invert()) : _me.set(1, 0, 0);
+    const G0 = _mg.set(-0.14, 1.28, 0.3);
+    const toC = _mb.subVectors(C, G0);
+    const L = toC.length();
+    toC.normalize();
+    const G = _mg2.copy(C).addScaledVector(toC, -Math.min(L, 0.62));
+    G.x = clamp(G.x, -0.5, 0.42); G.y = clamp(G.y, 0.8, 1.8); G.z = clamp(G.z, 0.12, 0.62);
+    const Bd = _mb.subVectors(C, G).normalize();
+    // recoil: blade swept along the enemy's line of travel
+    const Br = _mr.copy(Bd).addScaledVector(E, deflect ? 0.9 : 0.35).normalize();
+    const tw = clamp(C.x * 0.9, -0.55, 0.55);
+    const clip = compileClip({
+      keys: [
+        { t: 0, g: G.toArray(), b: Bd.toArray(), tw, hy: -0.06 },
+        { t: 0.03, g: G.toArray(), b: Bd.toArray(), tw, ln: -0.05, hy: -0.08, e: 'outExpo' },
+        { t: 0.12, g: G.toArray(), b: Bd.toArray(), tw, ln: -0.06, hy: -0.08, e: 'linear' },
+        { t: 0.22, g: [G.x + E.x * 0.12, G.y + 0.1, G.z - 0.05], b: Br.toArray(), tw: tw * 0.5, ln: -0.12, hy: -0.08, e: 'outExpo' },
+        { t: 0.48, ...{ g: GUARD.g, b: GUARD.b, l: GUARD.l, tw: GUARD.tw, hy: GUARD.hy }, e: 'inOut' },
+      ],
+    });
+    this.anim.playClip(clip, { startAt: 0.03, blendIn: 0.01 });
+    this.anim.final.grip.copy(G);
+  }
+
   faceThreat(dt) {
     const e = this.game.nearestThreat(this.body.pos, 6);
     if (e) this.faceTo(e.body.pos.x, e.body.pos.z, 10, dt);
@@ -773,16 +819,21 @@ export class Player extends Character {
       this.setState('deflect');
       this.parried = enemy;
       this.deflectT = 0.85;
-      this.anim.playClip(PLAYER.deflect, { blendIn: 0.02 });
       this.faceTo(enemy.body.pos.x, enemy.body.pos.z, 1000, 1);
+      if (info.contact) this.meetBlade(info.contact, info.edir, true);
+      else this.anim.playClip(PLAYER.deflect, { blendIn: 0.02 });
       this.focus = Math.min(100, this.focus + 14);
       return 'parried';
     }
     if (!info.unblockable && this.state === 'block' && info.perilous !== 'thrust') {
+      if (info.contact) this.meetBlade(info.contact, info.edir, false);
       this.damage(info.dmg * (info.chip ?? 0.15), info, true);
       const away = _sw.subVectors(this.body.pos, enemy.body.pos).setY(0).normalize();
       this.body.vel.addScaledVector(away, 3.2);
       return 'blocked';
+    }
+    if (!info.unblockable && (this.state === 'parry' || this.state === 'block') && this.parryT > window) {
+      this.game.hud.popup(this.parryT < window + 0.35 ? 'EARLY' : 'BLOCK LATE', this.headPos(_mc), '#ff8a6a', 0.7);
     }
     this.damage(info.dmg, info, false, enemy);
     return 'hit';
@@ -967,6 +1018,9 @@ const _ea = new THREE.Vector3(), _eb = new THREE.Vector3(), _sa = new THREE.Vect
 const _ca = new THREE.Vector3(), _cb = new THREE.Vector3(), _pt = new THREE.Vector3(), _sw = new THREE.Vector3();
 const _dd = new THREE.Vector3(), _loc = new THREE.Vector3(), _fl = new THREE.Vector3(), _fr = new THREE.Vector3();
 const _lf = new THREE.Vector3(), _rf = new THREE.Vector3(), _ad = new THREE.Vector3();
+const _bca = new THREE.Vector3(), _bcb = new THREE.Vector3();
+const _mc = new THREE.Vector3(), _me = new THREE.Vector3(), _mg = new THREE.Vector3(), _mg2 = new THREE.Vector3(), _mb = new THREE.Vector3(), _mr = new THREE.Vector3();
+const _mi = new THREE.Matrix4();
 function distToSegXZ(p, a, b) {
   const abx = b.x - a.x, abz = b.z - a.z;
   const l2 = abx * abx + abz * abz;

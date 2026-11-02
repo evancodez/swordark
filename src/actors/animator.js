@@ -370,15 +370,16 @@ export class Animator {
     const B = this.rig.bones;
     const la = this.rig.len.thigh * S, lb = this.rig.len.shin * S;
     const ankleH = 0.085 * S;
-    // hip drop so both feet can reach the ground (stairs / wide stance)
-    let need = 0;
+    // hip drop so both feet can reach the ground (stairs / wide stance).
+    // Signed: negative when both legs have slack, so the hips rise back up.
+    let need = -1e9;
     for (const f of this.feet) {
       const side = f.side > 0 ? 'L' : 'R';
       const hip = B[`thigh.${side}`].getWorldPosition(_sh);
       const dist = hip.distanceTo(_v.copy(f.pos).setY(f.pos.y + ankleH));
       need = Math.max(need, dist - (la + lb) * 0.985);
     }
-    if (ch.body.grounded && this.footMode !== 'air') this.hipDrop = damp(this.hipDrop, clamp(this.hipDrop + need, 0, 0.45 * S), 18, dt);
+    if (ch.body.grounded && this.footMode !== 'air') this.hipDrop = damp(this.hipDrop, clamp(this.hipDrop + need, 0, 0.3 * S), 14, dt);
     else this.hipDrop = damp(this.hipDrop, 0, 10, dt);
 
     for (const f of this.feet) {

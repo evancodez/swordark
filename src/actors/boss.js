@@ -189,8 +189,8 @@ export class Boss extends Enemy {
     } else if (clip.lunge && t >= clip.lunge[0] && t <= clip.lunge[1]) {
       const span = clip.lunge[1] - clip.lunge[0];
       const u = (t - clip.lunge[0]) / span;
-      let v = (clip.lunge[2] / span) * (Math.PI / 2) * Math.cos(u * Math.PI / 2) * this.anim.clipSpeed;
-      if (this.distTo(p) < 1.3) v = 0;
+      const remain = Math.max(0.05, (clip.lunge[1] - t) / this.anim.clipSpeed);
+      const v = clamp((this.distTo(p) - (clip.range ?? 1.5)) / remain, -3, 11) * Math.min(1, u * 4 + 0.3);
       b.vel.x = Math.sin(this.yaw) * v;
       b.vel.z = Math.cos(this.yaw) * v;
     } else {
@@ -203,12 +203,16 @@ export class Boss extends Enemy {
       this.whooshed = true;
       g.audio.play(this.heat > 0.5 ? 'fire_swing' : clip.spin ? 'whoosh_spin' : 'whoosh_heavy', { pos: b.pos, rate: 0.9 });
     }
-    if (!this.struck && t >= clip.hitAt) {
-      this.struck = true;
-      g.enemyStrike(this, clip);
+    if (!this.struck && t >= clip.hitAt - 0.05) {
+      const r = t <= clip.hitAt + 0.12 ? g.enemyBladeSweep(this, clip) : null;
+      if (r || t > clip.hitAt + 0.12) this.struck = true;
       if (this.state !== 'attack') return;
     }
-    if (clip.hitAt2 && !this.struck2 && t >= clip.hitAt2) { this.struck2 = true; g.enemyStrike(this, clip); if (this.state !== 'attack') return; }
+    if (clip.hitAt2 && !this.struck2 && t >= clip.hitAt2 - 0.05) {
+      const r = t <= clip.hitAt2 + 0.12 ? g.enemyBladeSweep(this, clip) : null;
+      if (r || t > clip.hitAt2 + 0.12) this.struck2 = true;
+      if (this.state !== 'attack') return;
+    }
     // chain
     const last = this.comboIdx >= this.combo.length - 1;
     if (!last && t >= hitEnd + 0.1 / this.speedMul) {

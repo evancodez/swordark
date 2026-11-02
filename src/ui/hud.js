@@ -31,6 +31,11 @@ export class HUD {
     this.showFps = false;
     this.popups = [];
     this.popWrap = document.getElementById('popups');
+    this.threatWrap = document.getElementById('threats');
+    this.threatEls = [];
+    this.lockEl = document.getElementById('lockon');
+    this.lockFill = this.lockEl.querySelector('.lhp-fill');
+    this.lockTag = this.lockEl.querySelector('.ltag');
     this.sb = document.getElementById('screenblood');
     this.sbx = this.sb.getContext('2d');
     this.sbAlpha = 0;
@@ -175,6 +180,50 @@ export class HUD {
       pp.el.style.left = '0px'; pp.el.style.top = '0px';
       pp.el.style.opacity = String(1 - Math.max(0, (k - 0.6) / 0.4));
     }
+    // arrows at the screen edge for attackers winding up off-screen
+    let ti = 0;
+    if (p.alive) for (const e of g.enemies) {
+      if (!e.alive) continue;
+      const ttl = e.timeToHit();
+      if (!(ttl < 0.7) || e.distTo(p) > 7) continue;
+      const v = _pv.copy(e.body.pos); v.y += 1.2;
+      v.project(cam);
+      const behind = v.z > 1;
+      let x = v.x, y = v.y;
+      if (behind) { x = -x; y = -y; }
+      if (!behind && Math.abs(x) < 0.92 && Math.abs(y) < 0.9) continue;
+      const a = Math.atan2(y, x);
+      const W = window.innerWidth, H = window.innerHeight;
+      const k = Math.min(0.88 * W / 2 / Math.max(1e-3, Math.abs(Math.cos(a) * W / 2)), 0.85 * H / 2 / Math.max(1e-3, Math.abs(Math.sin(a) * H / 2)));
+      const sx = W / 2 + Math.cos(a) * W / 2 * k, sy = H / 2 - Math.sin(a) * H / 2 * k;
+      let el = this.threatEls[ti];
+      if (!el) { el = document.createElement('div'); el.className = 'threat'; this.threatWrap.appendChild(el); this.threatEls.push(el); }
+      el.style.display = 'block';
+      el.style.transform = `translate(${sx - 12}px, ${sy - 11}px) rotate(${-a + Math.PI / 2}rad)`;
+      el.classList.toggle('red', !!(e.clip && (e.clip.unblockable || e.clip.perilous)));
+      el.classList.toggle('now', ttl <= e.parryWindow());
+      ti++;
+    }
+    for (let i = ti; i < this.threatEls.length; i++) this.threatEls[i].style.display = 'none';
+    // lock-on marker with the target's health and stance
+    const L = p.lock && p.lock.alive && !p.lock.isBoss ? p.lock : null;
+    if (L) {
+      const v = _pv.copy(L.body.pos);
+      v.y += 2.15 * L.rig.scale;
+      v.project(cam);
+      if (v.z < 1) {
+        const x = (v.x * 0.5 + 0.5) * window.innerWidth, y = (-v.y * 0.5 + 0.5) * window.innerHeight;
+        this.lockEl.style.transform = `translate(${x - 32}px, ${y - 10}px)`;
+        this.lockFill.style.transform = `scaleX(${Math.max(0, L.hp / L.maxHp)})`;
+        const guard = (L.guardUp || L.T.shield) && !L.isOpen();
+        const open = L.canBeExecuted();
+        this.lockEl.classList.toggle('guard', guard && !open);
+        this.lockEl.classList.toggle('open', open);
+        const tag = open ? 'OPEN' : guard ? 'GUARDING' : '';
+        if (tag !== this._ltag) { this._ltag = tag; this.lockTag.textContent = tag; }
+      }
+    }
+    this.lockEl.classList.toggle('show', !!L);
     // lens blood fades and runs
     if (this.sbAlpha > 0) {
       this.sbAlpha = Math.max(0, this.sbAlpha - dt * 0.28);

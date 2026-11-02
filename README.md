@@ -36,7 +36,9 @@ Open http://localhost:5173 in Chrome. Click to start, which locks the mouse. A P
 - **Red glints** can't be parried. Dodge or jump them. A last-instant dodge slows time and opens up the attacker.
 - **Counter-hits.** Hitting an enemy early in their wind-up interrupts them and does extra damage. Once they've committed to the swing, it lands unless you parry or dodge.
 - **Focus** fills when you land hits, parry, perfect-dodge and execute. Each bar spends on a Blood Art dash that cuts through everyone in a line. Blood Art unlocks after wave 1.
-- **Targeting** follows the stick inside a cone. With no input, only enemies close in front get targeted. Lock-on keeps you facing your target and strafing around it.
+- **Targeting** follows the stick inside a cone. With no input, only enemies close in front get targeted. Lock-on keeps you facing your target and strafing around it. The marker over a locked enemy shows its health and whether it's GUARDING or OPEN.
+- **Steel has to meet steel.** A swing only lands if the blade actually sweeps into its target, so stepping out of range makes it miss. The freeze-frame rewinds to the exact moment of contact. On a parry, your blade snaps to the point where the enemy's sword arrives. Executions land when the blade reaches the neck, chest or skull.
+- **Off-screen attackers** winding up show an arrow at the edge of the screen. It turns white when you're in the parry window, and red when the attack can't be parried.
 
 Waves add one new thing each time: raised guards and shields, then knife throwers, then a brute with unblockable swings, then everything at once. After that comes **Vaelor, the Iron Warden**, a duel built on posture: parries break his posture, and a broken posture opens him to a deathblow. At half health his sword catches fire and he adds new moves.
 

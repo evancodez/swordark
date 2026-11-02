@@ -209,6 +209,18 @@ export class FX {
     }
   }
 
+  // expanding ground ring for shockwaves
+  shockwave(p, radius) {
+    if (!this._ringGeo) {
+      this._ringGeo = new THREE.RingGeometry(0.85, 1, 48).rotateX(-Math.PI / 2);
+    }
+    const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 1.3, 1.0), transparent: true, opacity: 0.8, depthWrite: false, blending: THREE.AdditiveBlending });
+    const m = new THREE.Mesh(this._ringGeo, mat);
+    m.position.set(p.x, p.y + 0.04, p.z);
+    this.scene.add(m);
+    (this.rings || (this.rings = [])).push({ m, t: 0, r: radius });
+  }
+
   // meaty chunks that bounce and bleed
   gibs(p, dir, count = 5) {
     if (!this._gibGeo) {
@@ -230,6 +242,14 @@ export class FX {
   }
 
   update(dt) {
+    if (this.rings) for (let i = this.rings.length - 1; i >= 0; i--) {
+      const R = this.rings[i];
+      R.t += dt / 0.35;
+      const e = 1 - Math.pow(1 - Math.min(1, R.t), 3);
+      R.m.scale.setScalar(0.2 + e * R.r);
+      R.m.material.opacity = 0.8 * (1 - R.t);
+      if (R.t >= 1) { R.m.removeFromParent(); R.m.material.dispose(); this.rings.splice(i, 1); }
+    }
     this.sparks.update(dt);
     this.embers.update(dt);
     this.dust.update(dt);

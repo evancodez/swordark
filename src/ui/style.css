@@ -98,3 +98,11 @@ h2.red { color: var(--red-hi); text-shadow: 0 0 40px rgba(255,0,0,.5); }
 .threat { position: absolute; left: 0; top: 0; width: 0; height: 0; border-left: 12px solid transparent; border-right: 12px solid transparent; border-bottom: 22px solid #ffd27a; filter: drop-shadow(0 0 6px rgba(255,180,80,.9)); }
 .threat.red { border-bottom-color: #ff3b30; filter: drop-shadow(0 0 6px rgba(255,40,30,.9)); }
 .threat.now { border-bottom-color: #fff8e8; }
+
+#guard { position: relative; margin-top: 5px; height: 3px; width: 85%; background: rgba(0,0,0,.45); opacity: 0; transition: opacity .25s; }
+#guard.show { opacity: 1; }
+#guard-fill { position: absolute; inset: 0; transform-origin: left; background: #e8e0cf; }
+#guard.low #guard-fill { background: #ff7a4a; }
+#knives { margin-top: 22px; display: flex; gap: 6px; }
+#knives b { width: 4px; height: 16px; background: #d8d8de; clip-path: polygon(50% 0, 100% 30%, 100% 100%, 0 100%, 0 30%); opacity: .9; transition: opacity .2s; }
+#knives b.empty { opacity: .15; }

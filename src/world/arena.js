@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { makeFlameMaterial } from './weather.js';
+import { patchMaterial } from '../render/materials.js';
+import { addReflection } from '../render/reflection.js';
 import { rand } from '../core/math.js';
 
 // The Pit: an open, rain-soaked fighting ring. Nothing inside to hide behind —
@@ -54,20 +56,24 @@ export class Arena {
     this.world.addBox(-60, -1, -60, 60, 0, 60, { climb: false });
     this.world.setRing(0, 0, R, WALL_H + 0.6);
 
-    // floor: cobble disc + inlaid rings
+    // floor: wet cobble disc with live planar reflections
     const floor = new THREE.CircleGeometry(R + 0.5, 72).rotateX(-Math.PI / 2);
-    this._push('cobble', floor, 0.62);
+    worldUV(floor, 0.62);
+    const T = this.game.textures.cobble;
+    const floorMat = patchMaterial(new THREE.MeshStandardMaterial({ map: T.map, normalMap: T.normalMap, roughnessMap: T.roughnessMap, roughness: 0.62, normalScale: new THREE.Vector2(0.9, 0.9), envMapIntensity: 1.0 }), { rim: 0.05 });
+    if (this.game.reflection) addReflection(floorMat, this.game.reflection, 1.0);
+    const floorMesh = new THREE.Mesh(floor, floorMat);
+    floorMesh.receiveShadow = true;
+    this.group.add(floorMesh);
+    if (this.game.reflection) this.game.reflection.hidden.push(floorMesh);
+    this.floorMat = floorMat;
     const outerFloor = new THREE.RingGeometry(R + 0.5, 60, 48, 1).rotateX(-Math.PI / 2).translate(0, -0.01, 0);
     this._push('wallDark', outerFloor, 0.3);
     for (const [r0, r1] of [[3.0, 3.35], [8.6, 8.9]]) {
       const ring = new THREE.RingGeometry(r0, r1, 72, 1).rotateX(-Math.PI / 2).translate(0, 0.012, 0);
       this._push('trim', ring, 0.8);
     }
-    // central sigil: crossed blades in stone
-    for (const a of [Math.PI / 4, -Math.PI / 4]) {
-      const g = new THREE.BoxGeometry(0.18, 0.02, 4.2).rotateY(a).translate(0, 0.01, 0);
-      this._push('trim', g, 0.8);
-    }
+    this.buildPlatforms();
 
     // ring wall: segmented blocks with buttresses, gates at N/E/S/W
     const N = 56;
@@ -150,6 +156,7 @@ export class Arena {
 
     this.finalize();
     this.buildLights();
+    this.buildAtmosphere();
     this.spawnPoints = {
       player: new THREE.Vector3(0, 0, 7),
       doors: gateAngles.map((a) => new THREE.Vector3(Math.cos(a) * (R - 1.2), 0, Math.sin(a) * (R - 1.2))),
@@ -157,6 +164,66 @@ export class Arena {
       boss: new THREE.Vector3(0, 0, -(R - 2)),
       bossPlayer: new THREE.Vector3(0, 0, 6),
     };
+  }
+
+  // A little verticality without clutter: a low central dais, four stone plinths with steps,
+  // and two broken pillars to leap onto from the plinths.
+  buildPlatforms() {
+    const W = this.world;
+    const box = (x, z, w, d, h, y0 = 0, key = 'wall', climb = true) => {
+      const g = new RoundedBoxGeometry(w, h, d, 2, 0.07);
+      g.translate(x, y0 + h / 2, z);
+      this._push(key, g, 0.55);
+      W.addBox(x - w / 2, y0, z - d / 2, x + w / 2, y0 + h, z + d / 2, { climb });
+    };
+    const trimCap = (x, z, w, d, y) => {
+      const g = new RoundedBoxGeometry(w + 0.16, 0.12, d + 0.16, 2, 0.04).translate(x, y + 0.02, z);
+      this._push('trim', g, 0.7);
+    };
+    // central dais (walkable step) — round visual, collision from overlapping boxes
+    const daisH = 0.42, daisR = 2.5;
+    this._push('trim', new THREE.CylinderGeometry(daisR, daisR + 0.12, daisH, 40).translate(0, daisH / 2, 0), 0.6);
+    this._push('wall', new THREE.CylinderGeometry(daisR - 0.25, daisR - 0.25, 0.04, 40).translate(0, daisH + 0.01, 0), 0.4);
+    W.addBox(-daisR, 0, -1.05, daisR, daisH, 1.05);
+    W.addBox(-1.05, 0, -daisR, 1.05, daisH, daisR);
+    W.addBox(-1.78, 0, -1.78, 1.78, daisH, 1.78);
+    for (const a of [Math.PI / 4, -Math.PI / 4]) {
+      this._push('trim', new THREE.BoxGeometry(0.16, 0.03, 3.6).rotateY(a).translate(0, daisH + 0.025, 0), 0.8);
+    }
+    this._push('trim', new THREE.TorusGeometry(1.2, 0.06, 6, 40).rotateX(Math.PI / 2).translate(0, daisH + 0.02, 0), 0.8);
+
+    // four plinths between the gates
+    this.plinths = [];
+    for (let i = 0; i < 4; i++) {
+      const a = Math.PI / 4 + i * Math.PI / 2;
+      const cx = Math.round(Math.cos(a) * 8.0 * 10) / 10, cz = Math.round(Math.sin(a) * 8.0 * 10) / 10;
+      const h = 1.25;
+      box(cx, cz, 2.3, 2.3, h);
+      trimCap(cx, cz, 2.3, 2.3, h - 0.08);
+      // a waist-high step on the side facing the centre
+      const sx = cx - Math.sign(cx) * 1.55, sz = cz;
+      box(sx, sz, 0.9, 1.4, 0.6, 0, 'trim');
+      // carved frieze stripe
+      this._push('wallDark', new RoundedBoxGeometry(2.36, 0.16, 2.36, 1, 0.03).translate(cx, 0.55, cz), 0.6);
+      this.plinths.push({ x: cx, z: cz, top: h });
+      // two plinths carry a broken pillar you can leap onto
+      if (i % 2 === 0) {
+        const px = cx + Math.sign(cx) * 0.55, pz = cz + Math.sign(cz) * 0.55;
+        const ph = 2.05;
+        this._push('wall', new THREE.CylinderGeometry(0.5, 0.56, ph - h, 14).translate(px, h + (ph - h) / 2, pz), 0.5);
+        W.addBox(px - 0.45, h, pz - 0.45, px + 0.45, ph, pz + 0.45);
+        // jagged break on top
+        for (let k = 0; k < 4; k++) {
+          const g = new RoundedBoxGeometry(rand(0.2, 0.35), rand(0.08, 0.18), rand(0.2, 0.35), 1, 0.03).rotateY(rand(0, 3)).translate(px + rand(-0.25, 0.25), ph + 0.04, pz + rand(-0.25, 0.25));
+          this._push('wall', g, 0.5);
+        }
+      } else {
+        // the others hold a low brazier on their outer corner
+        this.plinthBraziers = this.plinthBraziers || [];
+        this.plinthBraziers.push(new THREE.Vector3(cx + Math.sign(cx) * 0.75, h, cz + Math.sign(cz) * 0.75));
+        W.addBox(cx + Math.sign(cx) * 0.75 - 0.32, h, cz + Math.sign(cz) * 0.75 - 0.32, cx + Math.sign(cx) * 0.75 + 0.32, h + 0.9, cz + Math.sign(cz) * 0.75 + 0.32, { climb: false });
+      }
+    }
   }
 
   buildGate(a, big) {
@@ -196,6 +263,33 @@ export class Arena {
     const scene = this.game.scene;
     const R = ARENA_R;
     const flameGeo = new THREE.PlaneGeometry(1, 1);
+    for (const b of this.plinthBraziers || []) {
+      const parts = [
+        new THREE.CylinderGeometry(0.05, 0.08, 0.6, 8).translate(b.x, b.y + 0.3, b.z),
+        new THREE.CylinderGeometry(0.32, 0.2, 0.24, 12, 1, true).translate(b.x, b.y + 0.72, b.z),
+        new THREE.TorusGeometry(0.32, 0.03, 6, 14).rotateX(Math.PI / 2).translate(b.x, b.y + 0.84, b.z),
+      ];
+      for (const p of parts) this._push('iron', p, 1);
+      const coal = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.24, 0.1, 10), this.M.coal);
+      coal.position.set(b.x, b.y + 0.78, b.z);
+      this.group.add(coal);
+      for (let k = 0; k < 2; k++) {
+        const f = new THREE.Mesh(flameGeo, makeFlameMaterial());
+        f.material.uniforms.uHeat.value = 0.55;
+        f.position.set(b.x + rand(-0.06, 0.06), b.y + 0.78, b.z + rand(-0.06, 0.06));
+        f.scale.set(rand(0.38, 0.5), rand(0.55, 0.8), 1);
+        f.renderOrder = 7;
+        f.frustumCulled = false;
+        this.group.add(f);
+        this.flames.push(f);
+      }
+      const light = new THREE.PointLight(0xff8a3a, 4.5, 14, 1.4);
+      light.position.set(b.x, b.y + 1.5, b.z);
+      scene.add(light);
+      this.lights.push({ light, base: 4.5, ph: Math.random() * 10 });
+      this.emberSources = this.emberSources || [];
+      this.emberSources.push(new THREE.Vector3(b.x, b.y + 0.95, b.z));
+    }
     const n = 8;
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2 + Math.PI / 8;
@@ -219,12 +313,52 @@ export class Arena {
         this.group.add(f);
         this.flames.push(f);
       }
+      this.emberSources = this.emberSources || [];
+      this.emberSources.push(new THREE.Vector3(x, y + 0.4, z));
       const light = new THREE.PointLight(0xff8a3a, 5.5, 20, 1.25);
       light.position.set(Math.cos(a) * (R - 1.2), y + 0.5, Math.sin(a) * (R - 1.2));
       scene.add(light);
       this.lights.push({ light, base: 5.5, ph: Math.random() * 10 });
     }
     this.finalize();
+  }
+
+  // flame halos in the rainy air, low drifting mist
+  buildAtmosphere() {
+    const tex = this.game.textures.soft;
+    this.halos = [];
+    for (const src of this.emberSources || []) {
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, color: new THREE.Color(0.9, 0.38, 0.12), transparent: true, opacity: 0.18, depthWrite: false, blending: THREE.AdditiveBlending }));
+      sp.position.copy(src).setY(src.y + 0.2);
+      sp.scale.setScalar(2.4);
+      sp.renderOrder = 6;
+      this.group.add(sp);
+      this.halos.push(sp);
+    }
+    const mistMat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false,
+      uniforms: { uTime: { value: 0 }, uR: { value: ARENA_R + 0.4 } },
+      vertexShader: `varying vec3 vW; void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
+      fragmentShader: `
+        uniform float uTime; uniform float uR; varying vec3 vW;
+        float h(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }
+        float n(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f); return mix(mix(h(i),h(i+vec2(1,0)),f.x), mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x), f.y); }
+        float fbm(vec2 p){ float a=0.5,s=0.0; for(int i=0;i<4;i++){ s+=a*n(p); p*=2.1; a*=0.5; } return s; }
+        void main(){
+          vec2 p = vW.xz * 0.18 + vec2(uTime * 0.03, uTime * 0.017) + vW.y;
+          float m = smoothstep(0.35, 0.85, fbm(p));
+          float edge = smoothstep(uR, uR * 0.55, length(vW.xz));
+          gl_FragColor = vec4(vec3(0.32, 0.37, 0.46), m * 0.055 * (0.4 + 0.6 * edge));
+        }`,
+    });
+    this.mistMat = mistMat;
+    for (const y of [0.12, 0.38, 0.7]) {
+      const m = new THREE.Mesh(new THREE.CircleGeometry(ARENA_R + 0.4, 48).rotateX(-Math.PI / 2), mistMat);
+      m.position.y = y;
+      m.renderOrder = 4;
+      this.group.add(m);
+      if (this.game.reflection) this.game.reflection.hidden.push(m);
+    }
   }
 
   breakObject() {}
@@ -246,6 +380,13 @@ export class Arena {
 
   update(dt, t) {
     for (const f of this.flames) f.material.uniforms.uTime.value = t;
+    if (this.mistMat) this.mistMat.uniforms.uTime.value = t;
+    // embers drifting up from every brazier
+    const fx = this.game.fx;
+    if (fx && dt > 0) for (const src of this.emberSources || []) {
+      if (Math.random() < dt * 7) fx.embers.spawn(src.x + rand(-0.15, 0.15), src.y, src.z + rand(-0.15, 0.15), rand(-0.3, 0.3) + 0.4, rand(1.0, 2.2), rand(-0.3, 0.3) + 0.25, 4, 1.4, 0.25, 1, rand(0.006, 0.013), rand(1.2, 2.4), -0.4, 0.6);
+    }
+    if (this.halos) for (let i = 0; i < this.halos.length; i++) this.halos[i].material.opacity = 0.15 + Math.sin(t * 9 + i * 1.7) * 0.03;
     for (const L of this.lights) {
       const fl = 0.85 + Math.sin(t * 13 + L.ph) * 0.05 + Math.sin(t * 7.3 + L.ph * 2) * 0.07;
       L.light.intensity = L.base * fl;

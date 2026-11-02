@@ -24,6 +24,7 @@ export function patchMaterial(mat, opts = {}) {
   const blade = !!opts.blade;
   const sway = !!opts.sway;
   const surf = !!opts.surf;
+  const grime = !!opts.grime;
   mat.userData.uniforms = mat.userData.uniforms || {};
   const U = mat.userData.uniforms;
   U.uRim = { value: RIM_COLOR.clone().multiplyScalar(rim) };
@@ -45,10 +46,12 @@ export function patchMaterial(mat, opts = {}) {
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>
 varying vec3 vBindPos;
+${grime ? 'varying vec3 vGrimeW;' : ''}
 ${surf ? 'attribute vec2 aSurf; varying vec2 vSurf;' : ''}
 ${sway ? 'uniform float uTime;' : ''}`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
 vBindPos = position;
+${grime ? 'vGrimeW = (modelMatrix * vec4(transformed, 1.0)).xyz;' : ''}
 ${surf ? 'vSurf = aSurf;' : ''}
 ${sway ? `
   float swayW = clamp((position.y) * 0.5, 0.0, 1.0);
@@ -60,6 +63,7 @@ ${sway ? `
 varying vec3 vBindPos;
 uniform vec3 uRim;
 uniform vec3 uRimDir;
+${grime ? 'varying vec3 vGrimeW;' : ''}
 ${surf ? 'varying vec2 vSurf;' : ''}
 ${blood ? 'uniform vec4 uBlood[10]; uniform vec3 uBloodColor; uniform float uBurn; uniform float uHitFlash;' : ''}
 ${blade ? 'uniform float uBladeBlood; uniform float uBladeHeat; uniform float uBladeLen;' : ''}
@@ -90,8 +94,29 @@ ${blade ? `
     gBloodMask = m;
     diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.25,0.0,0.0), m*0.9);
   }` : ''}`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+${blood ? `
+  {
+    // woven cloth / worn leather micro-relief so characters don't read as smooth plastic
+    float hh = bNoise(vBindPos * 150.0) * 0.55 + bNoise(vBindPos * 420.0) * 0.3 + bNoise(vBindPos * vec3(30.0, 6.0, 30.0)) * 0.4;
+    vec3 dpx = dFdx(-vViewPosition), dpy = dFdy(-vViewPosition);
+    vec2 dh = vec2(dFdx(hh), dFdy(hh)) * 0.02;
+    vec3 r1 = cross(dpy, normal), r2 = cross(normal, dpx);
+    float det = dot(dpx, r1);
+    vec3 grad = sign(det) * (dh.x * r1 + dh.y * r2);
+    normal = normalize(abs(det) * normal - grad);
+  }` : ''}`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
   ${surf ? 'roughnessFactor = vSurf.y;' : ''}
+  ${grime ? `{
+    // soot and rain-soaked grime pooling at the base of stonework, streaks running down
+    float gn = bNoise(vGrimeW * 1.7) * 0.6 + bNoise(vGrimeW * vec3(9.0, 0.6, 9.0)) * 0.4;
+    float base = 1.0 - smoothstep(0.0, 0.9 + gn * 0.6, vGrimeW.y);
+    float streak = smoothstep(0.55, 0.85, bNoise(vec3(vGrimeW.x * 3.0, vGrimeW.y * 0.25, vGrimeW.z * 3.0))) * 0.5;
+    float g = clamp(base * 0.75 + streak * 0.35, 0.0, 0.85);
+    diffuseColor.rgb *= 1.0 - g * 0.6;
+    roughnessFactor = mix(roughnessFactor, roughnessFactor * 0.55, g);
+  }` : ''}
   roughnessFactor = mix(roughnessFactor, 0.18, gBloodMask);`)
       .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
   ${surf ? 'metalnessFactor = vSurf.x;' : ''}
@@ -109,7 +134,7 @@ ${blade ? `
     totalEmissiveRadiance += vec3(6.0,1.6,0.25) * uBladeHeat * (0.5 + fl) * smoothstep(0.05, 0.2, tb);` : ''}
   }`);
   };
-  mat.customProgramCacheKey = () => `p${blood ? 1 : 0}${blade ? 1 : 0}${sway ? 1 : 0}${surf ? 1 : 0}`;
+  mat.customProgramCacheKey = () => `p${blood ? 1 : 0}${blade ? 1 : 0}${sway ? 1 : 0}${surf ? 1 : 0}${grime ? 1 : 0}`;
   return mat;
 }
 
@@ -117,9 +142,9 @@ export function makeMaterials(T) {
   const M = {};
   const std = (p, o) => patchMaterial(new THREE.MeshStandardMaterial(p), o);
   M.cobble = std({ map: T.cobble.map, normalMap: T.cobble.normalMap, roughnessMap: T.cobble.roughnessMap, normalScale: new THREE.Vector2(0.9, 0.9), envMapIntensity: 1.6 }, { rim: 0.05 });
-  M.wall = std({ map: T.wall.map, normalMap: T.wall.normalMap, roughnessMap: T.wall.roughnessMap, normalScale: new THREE.Vector2(1.4, 1.4), envMapIntensity: 0.9 }, { rim: 0.12 });
-  M.wallDark = std({ map: T.wall.map, normalMap: T.wall.normalMap, roughnessMap: T.wall.roughnessMap, color: 0x8a8890, envMapIntensity: 0.7 }, { rim: 0.12 });
-  M.trim = std({ map: T.wall.map, normalMap: T.wall.normalMap, color: 0xb8b2a8, roughness: 0.7, envMapIntensity: 0.6 }, { rim: 0.2 });
+  M.wall = std({ map: T.wall.map, normalMap: T.wall.normalMap, roughnessMap: T.wall.roughnessMap, normalScale: new THREE.Vector2(1.4, 1.4), envMapIntensity: 0.9 }, { grime: true, rim: 0.12 });
+  M.wallDark = std({ map: T.wall.map, normalMap: T.wall.normalMap, roughnessMap: T.wall.roughnessMap, color: 0x8a8890, envMapIntensity: 0.7 }, { grime: true, rim: 0.12 });
+  M.trim = std({ map: T.wall.map, normalMap: T.wall.normalMap, color: 0xb8b2a8, roughness: 0.7, envMapIntensity: 0.6 }, { grime: true, rim: 0.2 });
   M.wood = std({ map: T.wood.map, normalMap: T.wood.normalMap, roughnessMap: T.wood.roughnessMap, envMapIntensity: 0.6 }, { rim: 0.15 });
   M.woodDark = std({ map: T.wood.map, normalMap: T.wood.normalMap, color: 0x6a5a4c, roughness: 0.8, envMapIntensity: 0.5 }, { rim: 0.15 });
   M.roof = std({ map: T.roof.map, normalMap: T.roof.normalMap, roughnessMap: T.roof.roughnessMap, envMapIntensity: 1 }, { rim: 0.1 });

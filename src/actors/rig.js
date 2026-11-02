@@ -244,14 +244,18 @@ function commonBody(B, c, P) {
   for (const s of ['R', 'L']) {
     const sx = s === 'R' ? -1 : 1;
     B.ellipsoid('chest', [sx * 0.15 * bulk, 1.42, 0], [0.09 * bulk, 0.075, 0.085], c.torso, { weights: shoulderWeights(s), surf: c.torsoSurf });
-    B.limb(`upperArm.${s}`, `forearm.${s}`, 0.06 * bulk, 0.05 * Math.sqrt(bulk), c.sleeve ?? c.torso, { surf: c.sleeveSurf });
-    B.limb(`forearm.${s}`, `hand.${s}`, 0.05 * Math.sqrt(bulk), 0.04 * Math.sqrt(bulk), c.forearm ?? c.sleeve ?? c.torso, { surf: c.forearmSurf });
+    B.limb(`upperArm.${s}`, `forearm.${s}`, 0.068 * bulk, 0.056 * Math.sqrt(bulk), c.sleeve ?? c.torso, { surf: c.sleeveSurf });
+    B.limb(`forearm.${s}`, `hand.${s}`, 0.056 * Math.sqrt(bulk), 0.044 * Math.sqrt(bulk), c.forearm ?? c.sleeve ?? c.torso, { surf: c.forearmSurf });
+    const wr = J[`hand.${s}`];
+    B.cyl(`forearm.${s}`, [wr.x, wr.y + 0.05, wr.z], 0.05 * Math.sqrt(bulk), 0.054 * Math.sqrt(bulk), 0.07, c.cuff ?? 0x2a211b, { seg: 10, surf: [0, 0.65] });
     // hand: chunky mitten
     const h = J[`hand.${s}`];
     B.box(`hand.${s}`, [h.x, h.y - 0.075, h.z + 0.005], [0.07 * Math.sqrt(bulk), 0.13, 0.09], c.hands ?? 0x2a2420, { r: 0.03, surf: c.handSurf });
     // legs
-    B.limb(`thigh.${s}`, `shin.${s}`, 0.085 * bulk, 0.062 * Math.sqrt(bulk), c.legs, { zone: 0.25, surf: c.legSurf });
-    B.limb(`shin.${s}`, `foot.${s}`, 0.062 * Math.sqrt(bulk), 0.05, c.boots ?? c.legs, { surf: c.bootSurf });
+    B.limb(`thigh.${s}`, `shin.${s}`, 0.094 * bulk, 0.066 * Math.sqrt(bulk), c.legs, { zone: 0.25, surf: c.legSurf });
+    B.limb(`shin.${s}`, `foot.${s}`, 0.066 * Math.sqrt(bulk), 0.054, c.boots ?? c.legs, { surf: c.bootSurf });
+    const kn = J[`shin.${s}`];
+    B.cyl(`shin.${s}`, [kn.x, kn.y - 0.12, kn.z + 0.005], 0.078 * Math.sqrt(bulk), 0.072 * Math.sqrt(bulk), 0.07, c.boots ?? 0x221c18, { seg: 12, surf: c.bootSurf ?? [0, 0.6] });
     const f = J[`foot.${s}`];
     B.box(`foot.${s}`, [f.x, 0.045, f.z + 0.05], [0.1, 0.09, 0.24], c.boots ?? 0x221c18, { r: 0.035, surf: c.bootSurf });
   }
@@ -291,6 +295,13 @@ export const LOOKS = {
     B.ellipsoid('head', [0, 1.84, -0.06], [0.07, 0.07, 0.09], 0x2b2d34, { rot: [-0.5, 0, 0] });
     B.ellipsoid('head', [0, 1.79, 0.07], [0.125, 0.04, 0.08], 0x2b2d34, { rot: [0.25, 0, 0] });
     B.lathe([[0.17, 1.4], [0.12, 1.5], [0.09, 1.56]], 0x2b2d34, { sz: 0.85, weights: byHeight([[1.45, 'chest'], [1.55, 'neck']]) }); // cowl
+    // coat front panels and back slit flaps — swing with the legs
+    for (const sx of [-1, 1]) {
+      B.box('hips', [sx * 0.1, 0.68, 0.2], [0.17, 0.62, 0.025], 0x26282e, { rot: [0.08, 0, sx * -0.05], weights: skirtWeights(0.98, 0.36, 0.85), r: 0.01, surf: [0, 0.9] });
+      B.box('hips', [sx * 0.11, 0.66, -0.21], [0.18, 0.66, 0.025], 0x24262c, { rot: [-0.08, 0, 0], weights: skirtWeights(0.98, 0.36, 0.85), r: 0.01, surf: [0, 0.9] });
+    }
+    B.box('hips', [0.15, 0.97, 0.05], [0.07, 0.09, 0.05], 0x3a2a1c, { surf: [0, 0.65] });
+    B.box('chest', [0, 1.36, 0.155], [0.16, 0.05, 0.03], 0x3a2a1c, { surf: [0, 0.6] }); // chest strap buckle
   },
 
   grunt(B, v = 0) {
@@ -303,6 +314,11 @@ export const LOOKS = {
     commonBody(B, c, { bulk: 1.0 });
     // short skirt / tunic tail
     B.lathe([[0.24, 0.6], [0.2, 0.78], [0.165, 0.95], [0.155, 1.02]], c.torso, { sz: 0.78, weights: skirtWeights(0.98, 0.6, 0.85) });
+    const accent = [0x5a1612, 0x2a3a2a, 0x4a3a1a, 0x1a2230][v % 4];
+    B.box('hips', [0, 0.74, 0.175], [0.2, 0.46, 0.02], accent, { weights: skirtWeights(0.98, 0.5, 0.65), r: 0.008, surf: [0, 0.95] });
+    B.box('hips', [0, 0.76, -0.18], [0.22, 0.42, 0.02], accent, { weights: skirtWeights(0.98, 0.5, 0.65), r: 0.008, surf: [0, 0.95] });
+    B.box('chest', [0, 1.28, 0.125], [0.05, 0.46, 0.02], 0x2a1e16, { rot: [0, 0, 0.7], weights: byHeight([[1.12, 'spine'], [1.3, 'chest']]), surf: [0, 0.6] });
+    B.box('hips', [-0.16, 0.95, 0.07], [0.08, 0.1, 0.06], 0x3a2a1c, { surf: [0, 0.7] });
     // leather vest
     B.lathe([[0.16, 1.04], [0.165, 1.15], [0.2, 1.3], [0.21, 1.38], [0.17, 1.44]], 0x3a2a1e, { sz: 0.74, seg: 16, weights: byHeight([[1.08, 'spine'], [1.28, 'chest']]), surf: [0, 0.6] });
     // belt

@@ -8,7 +8,7 @@ const KEYMAP = {
   Space: 'jump',
   ShiftLeft: 'dodge', ShiftRight: 'dodge',
   KeyQ: 'parry', KeyC: 'parry',
-  KeyF: 'kick', KeyE: 'art', KeyV: 'art',
+  KeyF: 'throw', KeyE: 'art', KeyV: 'art',
   Tab: 'lock',
   Escape: 'pause', KeyP: 'pause',
   KeyR: 'restart',
@@ -21,15 +21,15 @@ const PADMAP = {
   1: 'dodge',    // Circle
   2: 'light',    // Square
   3: 'heavy',    // Triangle
-  4: 'parry',    // L1
-  5: 'kick',     // R1
-  6: 'lockhold', // L2 (hold to lock on)
-  7: 'art',      // R2 (Blood Art)
+  4: 'lockhold', // L1 (hold to lock on)
+  5: 'throw',    // R1 (throwing knife)
+  6: 'parry',    // L2 (tap parry / hold block)
+  7: 'art',      // R2 (Blood Art · ground pound in the air)
   11: 'lock',    // R3
   9: 'pause',    // Options
   8: 'restart',  // Create
 };
-const ACTIONS = ['jump', 'dodge', 'light', 'heavy', 'parry', 'kick', 'lock', 'lockhold', 'art', 'pause', 'restart', 'confirm'];
+const ACTIONS = ['jump', 'dodge', 'light', 'heavy', 'parry', 'throw', 'lock', 'lockhold', 'art', 'pause', 'restart', 'confirm'];
 
 class Input {
   constructor() {

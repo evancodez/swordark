@@ -3,8 +3,8 @@ import * as THREE from 'three';
 const _pv = new THREE.Vector3();
 
 const PROMPTS = {
-  kbm: { light: 'LMB', heavy: 'RMB', parry: 'Q', dodge: 'SHIFT', jump: 'SPACE', kick: 'F', lock: 'TAB / MMB', art: 'E', pause: 'ESC', restart: 'R' },
-  pad: { light: '□', heavy: '△', parry: 'L1', dodge: '○', jump: '✕', kick: 'R1', lock: 'L2 (hold) / R3', art: 'R2', pause: 'OPTIONS', restart: 'CREATE' },
+  kbm: { light: 'LMB', heavy: 'RMB', parry: 'Q', dodge: 'SHIFT', jump: 'SPACE', throw: 'F', lock: 'TAB / MMB', art: 'E', pause: 'ESC', restart: 'R' },
+  pad: { light: '□', heavy: '△', parry: 'L2', dodge: '○', jump: '✕', throw: 'R1', lock: 'L1 (hold) / R3', art: 'R2', pause: 'OPTIONS', restart: 'CREATE' },
 };
 
 export class HUD {
@@ -19,6 +19,7 @@ export class HUD {
       prompt: $('prompt'), hint: $('hint'),
       title: $('title'), pause: $('pause'), death: $('death'), victory: $('victory'),
       controls: document.querySelectorAll('.controls'), fps: $('fps'), wave: $('wave'),
+      guard: $('guard'), guardFill: $('guard-fill'), knives: document.querySelectorAll('#knives b'),
     };
     this.hpLag = 1;
     this.bossLag = 1;
@@ -54,9 +55,9 @@ export class HUD {
     const P = PROMPTS[d];
     const rows = [
       ['Move', d === 'pad' ? 'Left stick' : 'WASD'], ['Camera', d === 'pad' ? 'Right stick' : 'Mouse'],
-      ['Light slash / combo', P.light], ['Heavy cleave (hold: leaping slam)', P.heavy], ['Parry (hold: block)', P.parry],
-      ['Dodge (toward foe: vault)', P.dodge], ['Jump (double jump)', P.jump], ['Kick (breaks guard)', P.kick], ['Lock-on', P.lock],
-      ['Blood Art: rending dash (costs focus)', P.art], ['Execute opened foe', P.heavy], ['In air: slash / plunge', `${P.light} / ${P.heavy}`],
+      ['Strike (freeflow combo)', P.light], ['Heavy · breaks guards · executes', P.heavy], ['Parry (tap) / Block (hold)', P.parry],
+      ['Dodge (toward foe: vault)', P.dodge], ['Jump (double jump)', P.jump], ['Throwing knife', P.throw], ['Lock-on', P.lock],
+      ['Blood Art (costs focus)', P.art], ['In air: ground pound', P.art], ['8+ combo: special takedown', P.heavy],
     ];
     const html = rows.map(([a, k]) => `<div class="row"><span class="act">${a}</span><span class="key">${k}</span></div>`).join('');
     this.el.controls.forEach((c) => (c.innerHTML = html));
@@ -153,6 +154,11 @@ export class HUD {
     this.el.hp.style.transform = `scaleX(${hp})`;
     this.el.hpLag.style.transform = `scaleX(${this.hpLag})`;
     this.el.focus.style.transform = `scaleX(${p.focus / 100})`;
+    const gd = Math.max(0, p.guard / 100);
+    this.el.guardFill.style.transform = `scaleX(${gd})`;
+    this.el.guard.classList.toggle('show', gd < 0.99 || p.state === 'block');
+    this.el.guard.classList.toggle('low', gd < 0.35);
+    this.el.knives.forEach((k, i) => k.classList.toggle('empty', i >= p.knives));
     this.el.focusWrap.classList.toggle('full', p.focus >= 100);
     // boss
     const b = g.director.boss;
@@ -245,8 +251,8 @@ export class HUD {
     if (p.alive && p.state !== 'execute') {
       const t = g.nearestExecutable(p, 4.2);
       if (t) prompt = `<b>${this.key('heavy')}</b> ${t.isBoss ? (t.state === 'finished' ? 'FINISH HIM' : 'DEATHBLOW') : 'EXECUTE'}`;
-      else if (p.focus >= 100) prompt = `<b>${this.key('heavy')}</b> FOCUS EXECUTION READY`;
-      if (!prompt && p.lock && p.lock.alive && p.lock.guardUp && !p.lock.isOpen()) prompt = `GUARDING · <b>${this.key('kick')}</b> BREAK`;
+      if (!prompt && p.combo >= p.specialAt && p.alive) prompt = `<b>${this.key('heavy')}</b> SPECIAL TAKEDOWN`;
+      if (!prompt && p.lock && p.lock.alive && p.lock.guardUp && !p.lock.isOpen()) prompt = `GUARDING · <b>${this.key('heavy')}</b> BREAK`;
     }
     if (prompt !== this._prompt) { this._prompt = prompt; this.el.prompt.innerHTML = prompt; this.el.prompt.classList.toggle('show', !!prompt); }
     // wave counter

@@ -98,6 +98,16 @@ export const PLAYER = {
     ],
     hit: [0.14, 0.2], cancel: 0.3, lunge: [0.05, 0.16, 0.5], dmg: 6, knock: 7, dir: [0, 0.15, 1], kick: true,
   }),
+  // quick-fire knife throw with the free hand; sword stays on guard
+  throwKnife: c({
+    keys: [
+      { t: 0, ...GUARD },
+      { t: 0.07, g: [-0.24, 1.12, 0.28], b: [0.2, 0.55, 0.8], l: [0.26, 1.62, -0.12], tw: 0.45, ln: -0.04, hy: -0.03, e: 'out' },
+      { t: 0.13, g: [-0.22, 1.1, 0.3], b: [0.25, 0.55, 0.8], l: [0.08, 1.42, 0.68], tw: -0.35, ln: 0.1, hy: -0.04, e: 'outExpo' },
+      { t: 0.32, ...GUARD, e: 'inOut' },
+    ],
+    releaseAt: 0.12, dur: 0.32,
+  }),
   // parry flick (blade crosses in front)
   parry: c({
     keys: [

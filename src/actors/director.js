@@ -7,19 +7,19 @@ import { rand, pick } from '../core/math.js';
 const WAVES = [
   { name: 'Blood in the Rain', tokens: 1, guard: 0.3, aggro: 1.25, maxAlive: 3,
     list: ['grunt', 'grunt', 'grunt'],
-    hints: ['{light} Slash · time each strike, don\'t mash', 'Parry {parry} the instant a glint turns <i>white</i>', '{heavy} on a staggered or parried enemy to execute'] },
+    hints: ['{light} Strike · chain hits across enemies', 'Tap {parry} as a glint turns <i>white</i> to parry · hold to block', '{heavy} on a staggered or parried enemy to execute'] },
   { name: 'Raised Guards', tokens: 1, guard: 0.55, aggro: 1.1, maxAlive: 4,
     list: ['grunt', 'shield', 'grunt', 'grunt', 'shield'],
-    hints: ['A raised blade or shield blocks your slashes', '{kick} Kick or {heavy} heavy to break a guard', 'Blood Art {art} unlocked · costs one focus bar'] },
+    hints: ['A raised blade or shield blocks your slashes', '{heavy} Heavy smashes a guard open', 'Blood Art {art} unlocked · costs one focus bar'] },
   { name: 'Knives in the Dark', tokens: 2, guard: 0.55, aggro: 1.0, maxAlive: 5,
     list: ['grunt', 'thrower', 'grunt', 'shield', 'thrower', 'grunt'],
-    hints: ['Parry {parry} thrown knives to send them back', 'Hit an enemy mid wind-up for a <b>counter</b>'] },
+    hints: ['Parry {parry} thrown knives to send them back', '{throw} Throw a knife to interrupt a wind-up'] },
   { name: 'The Butcher', tokens: 2, guard: 0.6, aggro: 0.9, maxAlive: 5,
     list: ['brute', 'grunt', 'grunt', 'shield', 'grunt', 'thrower'],
     hints: ['<span style="color:#ff5040">Red</span> glint cannot be parried · {dodge} dodge it', 'A last-instant dodge opens them up'] },
   { name: 'No Mercy', tokens: 3, guard: 0.7, aggro: 0.8, maxAlive: 6,
     list: ['grunt', 'brute', 'shield', 'thrower', 'grunt', 'grunt', 'shield', 'brute', 'thrower', 'grunt'],
-    hints: ['Lock on with {lock} · flick the stick to switch targets'] },
+    hints: ['Jump and press {art} mid-air for a ground pound', 'Lock on with {lock} · flick the stick to switch targets'] },
 ];
 
 export class Director {

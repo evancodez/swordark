@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Pipeline } from './render/pipeline.js';
+import { FloorReflection } from './render/reflection.js';
 import { makeTextures } from './render/textures.js';
 import { makeMaterials, RIM_DIR } from './render/materials.js';
 import { CollisionWorld } from './world/collision.js';
@@ -25,7 +26,7 @@ class Game {
     this.renderer = this.pipeline.renderer;
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.08, 220);
-    this.pipeline.onResize = (w, h) => { this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); };
+    this.pipeline.onResize = (w, h) => { this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); if (this.reflection) this.reflection.setSize(w * this.pipeline.pixelRatio, h * this.pipeline.pixelRatio); };
     this.pipeline.resize();
     this.input = input;
     this.time = time;
@@ -36,9 +37,12 @@ class Game {
     this.materials = makeMaterials(this.textures);
     this.world = new CollisionWorld();
     this.setupLights();
+    this.reflection = new FloorReflection(0.5);
+    this.reflection.setSize(window.innerWidth * this.pipeline.pixelRatio, window.innerHeight * this.pipeline.pixelRatio);
     this.level = new Arena(this);
     this.level.build();
     this.artUnlocked = false;
+    this.muted = new URLSearchParams(location.search).has('mute');
     this.fx = new FX(this.scene, this.world, this.textures);
     this.blood = new BloodFX(this.scene, this.world, this.textures, audio);
     this.fx.onGibHit = (pos) => { this.blood.spray(pos, new THREE.Vector3(0, 1, 0), 6, 2, 0.8, 1.1); audio.play('splat', { pos, volume: 0.5 }); };
@@ -122,6 +126,7 @@ class Game {
 
   startGame() {
     audio.init();
+    if (this.muted) audio.setMasterVolume(0);
     audio.startAmbience();
     audio.setMusicMode('explore');
     audio.play('ui_confirm');
@@ -173,15 +178,34 @@ class Game {
     return best;
   }
 
+  // fighters don't walk through each other (enemies give way more than the player)
+  separateBodies() {
+    const P = this.player;
+    const list = this.enemies.filter((e) => e.alive && e.state !== 'victim');
+    if (P.alive && !['dash', 'art', 'vault', 'execute', 'plunge'].includes(P.state)) list.push(P);
+    for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+      const a = list[i], b = list[j];
+      if (Math.abs(a.body.pos.y - b.body.pos.y) > 1.3) continue;
+      const dx = b.body.pos.x - a.body.pos.x, dz = b.body.pos.z - a.body.pos.z;
+      const d = Math.hypot(dx, dz), min = (a.body.radius + b.body.radius) * 0.92;
+      if (d >= min || d < 1e-5) continue;
+      const push = min - d, nx = dx / d, nz = dz / d;
+      const wa = a === P ? 0.3 : b === P ? 0.7 : 0.5;
+      a.body.pos.x -= nx * push * wa; a.body.pos.z -= nz * push * wa;
+      b.body.pos.x += nx * push * (1 - wa); b.body.pos.z += nz * push * (1 - wa);
+      this.world.resolveCircle(a.body.pos, a.body.radius, a.body.pos.y, a.body.height, 0.5);
+      this.world.resolveCircle(b.body.pos, b.body.radius, b.body.pos.y, b.body.height, 0.5);
+    }
+  }
+
   // ---------------- combat ----------------
   playerHits(player, enemy, clip, point, dir) {
-    const kind = clip.kick ? 'kick' : clip.riposte ? 'riposte' : clip.heavy ? 'heavy' : clip.air ? 'air' : clip.spin ? 'spin' : 'light';
+    const kind = clip.riposte ? 'riposte' : clip.heavy ? 'heavy' : clip.air ? 'air' : clip.spin ? 'spin' : 'light';
     let dmg = clip.dmg;
     if (enemy.state === 'confused') dmg *= 1.6;
     if (enemy.state === 'parried' && !enemy.isBoss) dmg *= 2;
     if (player.perfectSwing) dmg *= 1.25;
     const info = { attacker: player, dmg, kind, dir: dir.clone(), point: point.clone(), knock: clip.knock };
-    if (kind === 'kick') { info.dir = player.forward(new THREE.Vector3()); }
     const res = enemy.receiveHit(info);
     if (res === 'none') return;
     if (res === 'blocked' || res === 'guardbreak') {
@@ -197,8 +221,8 @@ class Game {
       this.camRig.punch(dir.clone().negate(), 0.05);
       input.rumble(0.4, 0.7, 100);
       if (res === 'guardbreak') { this.hud.popup('GUARD BREAK', enemy.headPos(new THREE.Vector3()), '#ffb347'); enemy.rig.material.userData.uniforms.uHitFlash.value = 0.8; }
-      else if (!this._blockHinted) { this._blockHinted = true; this.hud.hint('Guard up! {kick} kick, {heavy} heavy or parry their attack', 4); }
-      if (res === 'blocked' && kind !== 'kick') {
+      else if (!this._blockHinted) { this._blockHinted = true; this.hud.hint('Guard up! {heavy} heavy breaks it, or parry their attack', 4); }
+      if (res === 'blocked') {
         // our blade bounces off
         player.anim.playClip(PLAYER.deflect, { blendIn: 0.02 });
         player.setState('deflect');
@@ -213,14 +237,7 @@ class Game {
     const out = new THREE.Vector3().subVectors(point, enemy.center(new THREE.Vector3())).setY(0).normalize();
     const spray = dir.clone().multiplyScalar(0.8).add(out.multiplyScalar(0.6)).normalize();
     spray.y = Math.max(spray.y, 0.15);
-    if (kind === 'kick') {
-      audio.play('kick', { pos: point });
-      this.fx.dustPuff(point, 4, [0.15, 0.13, 0.12]);
-      time.stop(0.07);
-      this.camRig.shake(0.22);
-      input.rumble(0.7, 0.4, 120);
-      if (killed) this.blood.spray(point, spray, 30, 5, 0.6);
-    } else {
+    {
       const big = heavy || info.counter || killed || player.perfectSwing;
       this.fx.slashFlash(point, dir, big ? [4, 0.8, 0.5] : [2.6, 0.5, 0.35], big ? 1.4 : 1);
       this.blood.spray(point, spray, big ? 85 : 50, big ? 8.5 : 6.5, 0.45, big ? 1.35 : 1.05);
@@ -244,14 +261,15 @@ class Game {
     // combo + focus
     player.combo++;
     player.comboTimer = 2.4;
-    player.focus = Math.min(100, player.focus + (kind === 'kick' ? 3 : 4));
+    player.focus = Math.min(100, player.focus + 4);
+    if (player.combo === player.specialAt) { this.hud.popup('TAKEDOWN READY', player.headPos(new THREE.Vector3()), '#ffd27a', 0.8); audio.play('combo_tick', { rate: 0.7 }); }
     this.stats.maxCombo = Math.max(this.stats.maxCombo, player.combo);
     this.hud.comboHit(player.combo);
     if (killed) {
       // dismemberment
       const S = enemy.rig.scale;
       const high = point.y > enemy.body.pos.y + 1.4 * S;
-      if (kind !== 'kick' && (heavy || high) && Math.random() < (kind === 'riposte' ? 0.6 : high ? 0.55 : 0.25)) this.sever(enemy, 'head', dir);
+      if ((heavy || high) && Math.random() < (kind === 'riposte' ? 0.6 : high ? 0.55 : 0.25)) this.sever(enemy, 'head', dir);
       else if (heavy && Math.random() < 0.4) this.sever(enemy, Math.random() < 0.5 ? 'armL' : 'armR', dir);
     }
   }
@@ -350,28 +368,34 @@ class Game {
     return this.resolveStrike(enemy, clip, info);
   }
 
-  resolveStrike(enemy, clip, info) {
+  resolveParryFx(enemy, info) {
     const p = this.player;
-    const res = p.receiveStrike(enemy, info);
-    const contact = info.contact;
-    if (res === 'parried') {
-      enemy.parried();
-      this.stats.parries++;
-      this.hud.popup('PARRY', contact, '#fff2c8', 0.7);
-      const n = info.edir.clone().negate().add(new THREE.Vector3(0, 0.4, 0)).normalize();
+    const contact = info.contact || enemy.bladeTip.clone();
+    const edir = info.edir || new THREE.Vector3(0, 0, 1);
+    enemy.parried();
+    this.stats.parries++;
+    this.hud.popup('PARRY', contact, '#fff2c8', 0.7);
+      const n = edir.clone().negate().add(new THREE.Vector3(0, 0.4, 0)).normalize();
       this.fx.sparksBurst(contact, n, 60, 10, 1.3);
       this.fx.flash(contact, 0.42, 0.12);
-      this.fx.slashFlash(contact, new THREE.Vector3().crossVectors(info.edir, new THREE.Vector3(0, 1, 0)).normalize(), [3.5, 2.6, 1.6], 0.8);
+      this.fx.slashFlash(contact, new THREE.Vector3().crossVectors(edir, new THREE.Vector3(0, 1, 0)).normalize(), [3.5, 2.6, 1.6], 0.8);
       audio.play('parry', { pos: contact });
       time.stop(enemy.isBoss ? 0.1 : 0.13);
       if (!enemy.isBoss) time.slow(0.35, 0.22, 5);
       this.camRig.shake(0.22);
       this.camRig.zoomKick(-3);
-      this.camRig.punch(info.edir, 0.05);
+      this.camRig.punch(edir, 0.05);
       input.rumble(1, 0.5, 130);
       this.fxState.flash = 0.1;
       p.combo++; p.comboTimer = 2.4; this.hud.comboHit(p.combo);
-    } else if (res === 'blocked') {
+  }
+
+  resolveStrike(enemy, clip, info) {
+    const p = this.player;
+    const res = p.receiveStrike(enemy, info);
+    const contact = info.contact;
+    if (res === 'parried') this.resolveParryFx(enemy, info);
+    else if (res === 'blocked') {
       this.fx.sparksBurst(contact, info.edir.clone().negate(), 22, 6);
       this.fx.flash(contact, 0.3, 0.08);
       audio.play('block', { pos: contact });
@@ -482,6 +506,64 @@ class Game {
     enemy.takeDamage({ dmg, kind: 'fall', dir: n.clone(), point: c });
   }
 
+  // Player quick-fire knife: homes lightly onto the target, interrupts wind-ups, sticks in flesh.
+  playerThrowKnife(player, target) {
+    const knife = buildSword('knife');
+    const hand = new THREE.Vector3();
+    player.rig.bones['hand.L'].getWorldPosition(hand);
+    let aim;
+    if (target && target.alive) aim = target.center(new THREE.Vector3()).addScaledVector(target.body.vel, 0.1);
+    else { aim = hand.clone().addScaledVector(player.forward(new THREE.Vector3()), 14); aim.y = hand.y - 0.2; }
+    const vel = aim.sub(hand).normalize().multiplyScalar(32);
+    knife.position.copy(hand);
+    this.scene.add(knife);
+    this.projectiles.push({ mesh: knife, pos: hand.clone(), vel, owner: player, target, fromPlayer: true, life: 1.3, spin: 0, stuck: 0 });
+    audio.play('throw', { pos: hand, rate: 1.35 });
+    input.rumble(0.2, 0.4, 50);
+  }
+
+  // R2 in the air: the blade hits the ground and everything nearby is thrown off its feet.
+  groundPound(player, pos) {
+    this.fx.dustPuff(pos, 36, [0.24, 0.23, 0.24]);
+    this.fx.shockwave(pos, 3.8);
+    this.fx.sparksBurst(pos.clone().setY(pos.y + 0.1), new THREE.Vector3(0, 1, 0), 40, 8);
+    this.fx.flash(pos.clone().setY(pos.y + 0.3), 0.8, 0.15);
+    audio.play('thud', { pos, volume: 1, rate: 0.65 });
+    audio.play('whoosh_heavy', { pos, rate: 0.55 });
+    this.camRig.shake(0.7);
+    this.camRig.zoomKick(-5);
+    this.fxState.ca = 1.5;
+    time.stop(0.12);
+    input.rumble(1, 1, 280);
+    for (const e of this.enemies) {
+      if (!e.alive || e.state === 'victim' || e.spawning) continue;
+      const d = Math.hypot(e.body.pos.x - pos.x, e.body.pos.z - pos.z);
+      if (d > 3.8 || Math.abs(e.body.pos.y - pos.y) > 1.6) continue;
+      const dir = new THREE.Vector3(e.body.pos.x - pos.x, 0, e.body.pos.z - pos.z);
+      if (dir.lengthSq() < 1e-4) dir.set(rand(-1, 1), 0, rand(-1, 1));
+      dir.normalize();
+      const c = e.center(new THREE.Vector3());
+      if (d < 1.1 && !e.isBoss) {
+        // came down right on top of them
+        e.receiveHit({ attacker: player, dmg: 999, kind: 'heavy', dir: new THREE.Vector3(0, -1, 0), point: c });
+        this.blood.spray(c, new THREE.Vector3(0, 1, 0), 120, 7, 0.5, 1.5);
+        e.rig.addBlood(c, 0.25);
+        this.hud.screenBlood(0.4);
+        audio.play('sever', { pos: c });
+        audio.play('execute');
+        time.slow(0.3, 0.4);
+        this.stats.executions++;
+        continue;
+      }
+      const res = e.receiveHit({ attacker: player, dmg: 32 * (1 - (d / 3.8) * 0.5), kind: 'pound', dir, point: c, knock: 6 });
+      if (res === 'hit' || res === 'killed' || res === 'guardbreak') {
+        this.blood.spray(c, dir.clone().setY(0.5).normalize(), 35, 5, 0.5);
+        e.rig.material.userData.uniforms.uHitFlash.value = 0.6;
+        player.combo++; player.comboTimer = 2.6; this.hud.comboHit(player.combo);
+      }
+    }
+  }
+
   throwKnife(enemy) {
     const knife = buildSword('knife');
     const hand = new THREE.Vector3();
@@ -512,6 +594,51 @@ class Game {
         continue;
       }
       if (k.life <= 0) { k.mesh.removeFromParent(); this.projectiles.splice(i, 1); continue; }
+      if (k.fromPlayer) {
+        if (k.target && k.target.alive) {
+          const want = k.target.center(new THREE.Vector3()).sub(k.pos).normalize().multiplyScalar(32);
+          k.vel.lerp(want, Math.min(1, dt * 7));
+        }
+        const prevP = k.pos.clone();
+        k.pos.addScaledVector(k.vel, dt);
+        k.mesh.position.copy(k.pos);
+        k.mesh.lookAt(k.pos.clone().add(k.vel));
+        k.spin += dt * 40;
+        k.mesh.rotateX(k.spin);
+        if (Math.random() < 0.6) this.fx.sparks.spawn(k.pos.x, k.pos.y, k.pos.z, 0, 0, 0, 1.0, 0.95, 0.9, 0.5, 0.006, 0.1, 0, 0);
+        let done = false;
+        for (const e of this.enemies) {
+          if (!e.alive || e.spawning || e.state === 'victim') continue;
+          const a = e.body.pos.clone().setY(e.body.pos.y + 0.3), b = e.body.pos.clone().setY(e.body.pos.y + 1.8 * e.rig.scale);
+          if (distPointSeg(k.pos, a, b) > 0.42) continue;
+          const dir = k.vel.clone().normalize();
+          const res = e.receiveHit({ attacker: p, dmg: 10, kind: 'knife', dir, point: k.pos.clone() });
+          if (res === 'blocked') {
+            this.fx.sparksBurst(k.pos, dir.clone().negate(), 14, 5);
+            audio.play('block', { pos: k.pos, rate: 1.5, volume: 0.6 });
+            this.fx.addDebris(k.mesh, dir.clone().multiplyScalar(-2).setY(2.5), new THREE.Vector3(14, 3, 6), { radius: 0.02, life: 8 });
+          } else {
+            this.blood.spray(k.pos, dir, 18, 3.5, 0.4);
+            e.rig.addBlood(k.pos, 0.07);
+            audio.play('knife_hit', { pos: k.pos });
+            if (e.state === 'stagger' || e.state === 'hitstun') this.hud.popup('INTERRUPT', e.headPos(new THREE.Vector3()), '#9fd0ff', 0.6);
+            time.stop(0.04);
+            // the knife stays in them
+            e.rig.bones.chest.attach(k.mesh);
+            p.combo++; p.comboTimer = 2.4; this.hud.comboHit(p.combo);
+          }
+          done = true;
+          break;
+        }
+        if (!done && this.world.pointInside(k.pos)) {
+          k.pos.copy(prevP); k.mesh.position.copy(prevP);
+          audio.play('knife_hit', { pos: k.pos, volume: 0.5 });
+          k.stuck = 6; k.fromPlayer = false; k.deflected = true; k.owner = null;
+          continue;
+        }
+        if (done) { this.projectiles.splice(i, 1); }
+        continue;
+      }
       if (k.deflected && k.owner && k.owner.alive) {
         // homes back into the thrower
         const tgt = k.owner.center(new THREE.Vector3());
@@ -530,7 +657,7 @@ class Game {
         const a = p.body.pos.clone().setY(p.body.pos.y + 0.3), b = p.body.pos.clone().setY(p.body.pos.y + 1.75);
         const dseg = distPointSeg(k.pos, a, b);
         if (dseg < 0.5) {
-          const res = p.receiveStrike(k.owner, { dmg: 11, parryWindow: 0.34, heavy: false });
+          const res = p.receiveStrike(k.owner, { dmg: 11, parryWindow: 0.4, heavy: false, ranged: true });
           if (res === 'parried') {
             k.deflected = true;
             k.life = 2;
@@ -858,7 +985,7 @@ class Game {
     requestAnimationFrame((t) => this.frame(t));
     const realDt = Math.min(0.05, Math.max(0.0001, (now - this.last) / 1000));
     this.last = now;
-    if (this.freeze) { this.pipeline.render(this.scene, this.camera, time.real); return; }
+    if (this.freeze) { this.reflection.update(this.renderer, this.scene, this.camera); this.pipeline.render(this.scene, this.camera, time.real); return; }
     input.update(realDt, time.real);
     const playing = this.state === 'play' || this.state === 'dead' || this.state === 'victory';
     if (this.state === 'paused' || this.state === 'title') { time.realDt = realDt; time.real += realDt; time.dt = 0; }
@@ -880,6 +1007,7 @@ class Game {
       this.director.update(dt);
       this.player.update(dt);
       for (const e of this.enemies) e.update(dt);
+      this.separateBodies();
       this.updateExecutions(dt);
       this.updateProjectiles(dt);
       this.fx.update(dt);
@@ -899,8 +1027,15 @@ class Game {
     const lockPos = p.lock && p.lock.alive ? p.lock.body.pos.clone().setY(p.lock.body.pos.y + 1.2) : null;
     this.camRig.lock = lockPos;
     const look = this.state === 'play' ? { x: lockPos ? 0 : input.look.x, y: input.look.y } : { x: this.state === 'title' ? realDt * 0.12 : 0, y: 0 };
+    // gentle framing assist: when you leave the camera alone mid-fight it drifts to keep your target in view
+    let assistYaw;
+    const tgt = p.target && p.target.alive ? p.target : null;
+    if (!lockPos && tgt && p.combat && this.state === 'play') {
+      const dx = tgt.body.pos.x - p.body.pos.x, dz = tgt.body.pos.z - p.body.pos.z;
+      if (dx * dx + dz * dz > 0.5) assistYaw = Math.atan2(-dx, -dz);
+    }
     this.camRig.update(realDt, dt, p.alive || !p.ragdoll ? p.body.pos : p.ragdoll.p[0], look, {
-      combat: p.combat, airborne: !p.body.grounded, sprint: p.sprint,
+      combat: p.combat, airborne: !p.body.grounded, sprint: p.sprint, assistYaw,
     });
     // follow shadows
     const sp = p.body.pos;
@@ -941,7 +1076,11 @@ class Game {
     audio.setMusicIntensity(clamp(threat / 5 + p.combo / 25, 0, 1));
 
     this.hud.update(realDt);
-    if (!this.skipRender) this.pipeline.render(this.scene, this.camera, time.real);
+    if (!this.skipRender) {
+      this.camera.updateMatrixWorld();
+      this.reflection.update(this.renderer, this.scene, this.camera);
+      this.pipeline.render(this.scene, this.camera, time.real);
+    }
   }
 }
 
@@ -982,7 +1121,9 @@ if (import.meta.env.DEV) {
     release(a) { g.input._kbUp(a); },
     move(x, y) { g.input.keys.clear(); if (y > 0) g.input.keys.add('KeyW'); if (y < 0) g.input.keys.add('KeyS'); if (x > 0) g.input.keys.add('KeyD'); if (x < 0) g.input.keys.add('KeyA'); },
     start(wave = 0) {
+      g.muted = true;
       g.startGame(); g.timers.length = 0; g.hud.hints.length = 0;
+      audio.setMasterVolume(0);
       simT = performance.now(); g.last = simT;
       if (wave === 'boss') { g.director.wave = 4; g.director.phase = 'gate'; g.director.gateT = 0.5; g.artUnlocked = true; g.level.openGate(true); g.player.reset(g.level.spawnPoints.bossPlayer, Math.PI); }
       else if (wave >= 0) { g.director.startWave(wave); g.hud.hints.length = 0; if (wave >= 1) g.artUnlocked = true; }
@@ -1004,6 +1145,8 @@ if (import.meta.env.DEV) {
     g.pipeline.sceneRT.setSize(w, h); g.pipeline.inkRT.setSize(w, h); g.pipeline.bloom.setSize(w, h);
     g.pipeline.inkMat.uniforms.uRes.value.set(w, h); g.pipeline.fx.uRes.value.set(w, h);
     g.camera.aspect = w / h; g.camera.updateProjectionMatrix();
+    g.camera.updateMatrixWorld();
+    g.reflection.update(g.renderer, g.scene, g.camera);
     g.pipeline.render(g.scene, g.camera, g.time.real);
     const url = g.canvas.toDataURL('image/jpeg', 0.88);
     g.pipeline.pixelRatio = pr;

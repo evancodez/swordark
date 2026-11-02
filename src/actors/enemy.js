@@ -6,10 +6,10 @@ import { clamp, damp, dampAngle, rand, pick, wrapAngle, ease } from '../core/mat
 import { RAMPART_Y } from '../world/level.js';
 
 export const TYPES = {
-  grunt: { look: 'grunt', hp: 130, sword: 'grunt', scale: 1.0, speed: 4.8, parryWindow: 0.32, attacks: ['slash', 'slash', 'thrust', 'combo'] },
-  shield: { look: 'shield', hp: 150, sword: 'grunt', scale: 1.02, speed: 4.2, parryWindow: 0.32, shield: true, attacks: ['slash', 'thrust'] },
-  thrower: { look: 'thrower', hp: 70, sword: 'knife', scale: 0.97, speed: 5.2, parryWindow: 0.3, ranged: true, attacks: ['slash'] },
-  brute: { look: 'brute', hp: 380, sword: 'brute', scale: 1.24, speed: 3.6, parryWindow: 0.3, armor: true, attacks: ['overhead', 'sweep', 'sweep'] },
+  grunt: { look: 'grunt', hp: 130, sword: 'grunt', scale: 1.0, speed: 4.8, parryWindow: 0.42, attacks: ['slash', 'slash', 'thrust', 'combo'] },
+  shield: { look: 'shield', hp: 150, sword: 'grunt', scale: 1.02, speed: 4.2, parryWindow: 0.42, shield: true, attacks: ['slash', 'thrust'] },
+  thrower: { look: 'thrower', hp: 70, sword: 'knife', scale: 0.97, speed: 5.2, parryWindow: 0.4, ranged: true, attacks: ['slash'] },
+  brute: { look: 'brute', hp: 380, sword: 'brute', scale: 1.24, speed: 3.6, parryWindow: 0.38, armor: true, attacks: ['overhead', 'sweep', 'sweep'] },
 };
 
 let indicatorTex = null;
@@ -75,7 +75,7 @@ export class Enemy extends Character {
 
   get isBoss() { return false; }
   canBeExecuted() {
-    return this.alive && (this.state === 'parried' || this.state === 'down' || (this.state === 'stagger' && this.hp < this.maxHp * 0.5) || this.hp <= this.maxHp * 0.22 || this.state === 'confused' || this.state === 'wallsplat');
+    return this.alive && this.state !== 'victim' && (this.state === 'parried' || (this.openT || 0) > 0 || this.hp <= this.maxHp * 0.22 || this.state === 'confused' || this.state === 'wallsplat');
   }
 
   spawnAt(pos, mode) {
@@ -103,6 +103,7 @@ export class Enemy extends Character {
   update(dt) {
     this.stateT += dt;
     this.attackCD -= dt;
+    this.openT = Math.max(0, (this.openT || 0) - dt);
     this.thinkT -= dt;
     const g = this.game, p = g.player;
     if (!this.alive) {
@@ -226,7 +227,7 @@ export class Enemy extends Character {
         speed = this.speed * (pd > 4 ? 1 : 0.75);
         this.faceTo(p.body.pos.x, p.body.pos.z, 10, dt);
         // player stands on something higher: leap up
-        if (dy > 0.6 && dy < 3.0 && pd < 3.2 && b.grounded) { this.leapUp(p.body.pos); return; }
+        if (dy > 0.5 && dy < 3.2 && pd < 4.0 && b.grounded) { this.leapUp(p.body.pos); return; }
       } else if (Math.abs(dy) < 1.0) {
         this.startAttack();
         return;
@@ -244,7 +245,7 @@ export class Enemy extends Character {
       tx /= l; tz /= l;
       speed = Math.abs(radial) > 1.5 ? this.speed * 0.9 : 1.5;
       this.faceTo(p.body.pos.x, p.body.pos.z, 8, dt);
-      if (dy > 0.6 && dy < 3.0 && pd < 3.2 && b.grounded && Math.random() < dt * 0.5) { this.leapUp(p.body.pos); return; }
+      if (dy > 0.5 && dy < 3.2 && pd < 4.5 && b.grounded && Math.random() < dt * 0.35) { this.leapUp(p.body.pos); return; }
     }
     // separation from other enemies
     for (const o of g.enemies) {
@@ -308,14 +309,20 @@ export class Enemy extends Character {
     b.vel.z += clamp(tz * speed - b.vel.z, -acc, acc);
   }
 
+  // Jump up onto whatever the player is standing on, landing beside them (not on top of them).
   leapUp(target) {
-    const b = this.body;
-    const h = target.y - b.pos.y + 0.6;
-    b.vel.y = Math.sqrt(2 * 24 * Math.max(0.5, h));
-    const t = b.vel.y / 24 + 0.15;
-    b.vel.x = (target.x - b.pos.x) / t * 0.8;
-    b.vel.z = (target.z - b.pos.z) / t * 0.8;
+    const b = this.body, w = this.game.world;
+    const dx = b.pos.x - target.x, dz = b.pos.z - target.z, d = Math.hypot(dx, dz) || 1;
+    let lx = target.x + (dx / d) * 0.95, lz = target.z + (dz / d) * 0.95;
+    if (w.groundHeight(lx, lz, target.y + 0.3, 0.15) < target.y - 0.25) { lx = target.x + (dx / d) * 0.4; lz = target.z + (dz / d) * 0.4; }
+    const rise = Math.max(0.4, target.y - b.pos.y) + 0.65;
+    const g = 24;
+    b.vel.y = Math.sqrt(2 * g * rise);
+    const T = b.vel.y / g + Math.sqrt(2 * 0.65 / g);
+    b.vel.x = (lx - b.pos.x) / T;
+    b.vel.z = (lz - b.pos.z) / T;
     b.grounded = false;
+    this.yaw = this.yawTo(target.x, target.z);
     this.setState('leapup');
     this.game.audio.play('jump', { pos: b.pos, volume: 0.5 });
   }
@@ -440,13 +447,14 @@ export class Enemy extends Character {
     if (now - (this.lastHitT || -9) > 1.1) this.comboTaken = 0;
     const k = info.kind;
     const light = k === 'light' || k === 'air' || k === 'spin';
-    const breaker = k === 'kick' || k === 'heavy' || k === 'slam' || k === 'art' || k === 'riposte';
+    const breaker = k === 'heavy' || k === 'pound' || k === 'art' || k === 'riposte';
     const front = fromAngle < 1.25;
     // counter-hit: caught mid wind-up
     // (only early in the wind-up — once committed, the swing lands unless parried or dodged)
-    if (this.state === 'attack' && !this.struck && !this.armored && this.timeToHit() > 0.24 && (light || breaker)) info.counter = true;
-    // raised guard (and shields) stop light attacks from the front
-    if (front && !this.isOpen() && (this.guardUp || this.T.shield) && light) {
+    if (this.state === 'attack' && !this.struck && !this.armored && ((this.timeToHit() > 0.24 && (light || breaker)) || (k === 'knife' && this.timeToHit() > 0.05))) info.counter = true;
+    // raised guard (and shields) stop light attacks and knives from the front
+    if (front && !this.isOpen() && (this.guardUp || this.T.shield) && (light || k === 'knife')) {
+      if (k === 'knife') { this.anim.hit(0, -1, 0.3); return 'blocked'; }
       this.anim.hit(0, -1, 0.5);
       this.blocks = (this.blocks || 0) + 1;
       this.body.vel.addScaledVector(info.dir, 1.2);
@@ -461,14 +469,15 @@ export class Enemy extends Character {
       return 'blocked';
     }
     if (breaker && (this.guardUp || this.T.shield) && !this.isOpen() && k !== 'riposte') {
+      // heavy / art / pound smash the guard open
       this.guardUp = false;
       this.blocks = 0;
-      if (k === 'kick' || k === 'art') {
-        this.hp -= info.dmg * 0.5;
-        this.stagger(1.1);
-        if (this.hp <= 0) { this.die(info); return 'killed'; }
-        return 'guardbreak';
-      }
+      this.hp -= info.dmg * 0.6;
+      if (this.hp <= 0) { this.die(info); return 'killed'; }
+      if (k === 'pound' || k === 'art') this.knockback(info.dir, k === 'pound' ? 5 : 5.5, 3.5);
+      else this.stagger(1.1);
+      this.openT = 1.3;
+      return 'guardbreak';
     }
     this.comboTaken = (this.comboTaken || 0) + 1;
     this.lastHitT = now;
@@ -497,18 +506,28 @@ export class Enemy extends Character {
     this.hp -= info.dmg * armor;
     const dir = info.dir || _tmp.set(0, 0, 1);
     const local = this.toLocal(dir, _loc);
-    this.anim.hit(local.x, local.z, info.kind === 'heavy' || info.kind === 'kick' ? 1.6 : 1);
+    this.anim.hit(local.x, local.z, info.kind === 'heavy' || info.kind === 'pound' ? 1.6 : info.kind === 'knife' ? 0.5 : 1);
     if (this.hp <= 0) { this.die(info); return; }
     const k = info.kind;
-    const superArmor = this.T.armor && (this.state === 'attack') && k !== 'heavy' && k !== 'kick' && k !== 'slam' && k !== 'art' && !(info.counter && k === 'riposte');
+    const superArmor = this.T.armor && (this.state === 'attack') && k !== 'heavy' && k !== 'pound' && k !== 'art' && !(info.counter && k === 'riposte');
     if (superArmor) { this.lightHits++; return; }
-    if (k === 'kick' || k === 'slam' || k === 'plunge' || k === 'spin') {
-      this.knockback(dir, info.knock ?? 6, k === 'kick' ? 2.8 : 4);
+    if (k === 'knife') {
+      // a knife in the arm interrupts a wind-up; otherwise it just stings
+      if (this.state === 'attack' && info.counter) { this.stagger(0.6); this.openT = 0.6; }
+      else if (!this.T.armor && this.state !== 'attack') { this.cancelAttack(); this.setState('hitstun'); this.hitstun = 0.28; }
+      return;
+    }
+    if (k === 'pound' || k === 'spin') {
+      this.knockback(dir, info.knock ?? 5, k === 'pound' ? 4.2 : 3);
+      this.openT = 1.4;
     } else if (k === 'art') {
       this.knockback(dir, 5, 2.5);
+      this.openT = 1.2;
     } else if (k === 'heavy' || k === 'riposte') {
       if (this.T.armor && k === 'heavy') this.stagger(0.9);
+      else if (k === 'heavy') { this.stagger(0.95); this.body.vel.addScaledVector(dir, 3.5); }
       else this.knockback(dir, info.knock ?? 4, 3);
+      this.openT = 1.2;
     } else if (k === 'deflect') {
       this.stagger(0.6);
     } else {
@@ -589,9 +608,11 @@ export class Enemy extends Character {
       if (br.alive && br.pos.distanceTo(_tmp.copy(b.pos).setY(b.pos.y + 0.5)) < br.size * 0.8 + 0.3) this.game.level.breakObject(br, _tmp2.copy(b.vel).normalize());
     }
     if (b.grounded && this.stateT > 0.08) {
-      this.anim.stopClip(0.1);
-      this.setState('down');
-      this.game.audio.play('thud', { pos: b.pos, volume: 0.7 });
+      // land on their feet, stumbling and wide open
+      this.stagger(1.0);
+      this.openT = Math.max(this.openT || 0, 1.1);
+      this.anim.land.v += 6;
+      this.game.audio.play('thud', { pos: b.pos, volume: 0.6 });
       this.game.fx.dustPuff(b.pos, 6);
     }
     return 24;
@@ -600,7 +621,7 @@ export class Enemy extends Character {
     this.body.vel.x = damp(this.body.vel.x, 0, 10, dt);
     this.body.vel.z = damp(this.body.vel.z, 0, 10, dt);
     this.anim.bodyTilt.x = damp(this.anim.bodyTilt.x, -0.3, 10, dt);
-    if (this.stateT > 1.2) this.setState('down');
+    if (this.stateT > 1.2) { this.stagger(0.6); this.openT = 0.8; }
   }
   stDown(dt) {
     const t = this.stateT;
@@ -630,10 +651,10 @@ export class Enemy extends Character {
     this.anim.flip = 0;
     const dir = info.dir ? info.dir.clone() : new THREE.Vector3(0, 0, 1);
     dir.y = Math.max(dir.y, 0.15);
-    const force = info.kind === 'kick' ? 7 : info.kind === 'heavy' || info.kind === 'slam' ? 6 : info.kind === 'fall' ? 1 : 4;
+    const force = info.kind === 'pound' ? 7 : info.kind === 'heavy' ? 6 : info.kind === 'fall' ? 1 : 4;
     const part = info.point && info.point.y > this.body.pos.y + 1.45 * this.rig.scale ? 'head' : 'chest';
     this.ragdollDeath(this.body.vel.clone().multiplyScalar(0.6), dir.multiplyScalar(force), part);
-    if (Math.random() < 0.65 || info.kind === 'kick') this.dropSword(new THREE.Vector3(rand(-2, 2), 3.5, rand(-2, 2)));
+    if (Math.random() < 0.65 || info.kind === 'pound') this.dropSword(new THREE.Vector3(rand(-2, 2), 3.5, rand(-2, 2)));
     if (this.shield && Math.random() < 0.5) {
       const s = this.shield;
       s.updateWorldMatrix(true, false);
@@ -680,12 +701,7 @@ export class Enemy extends Character {
       P.handL.set(0.35, 1.4, 0.1);
       return;
     }
-    if (this.state === 'down') {
-      this.locomotionPose(P, dt, ENEMY_GUARD, { noTrailSword: true });
-      P.hips.y = -0.32;
-      P.grip.set(-0.45, 0.9, 0.0); P.handL.set(0.4, 0.9, 0.0);
-      return;
-    }
+
     if (this.state === 'wallsplat') {
       this.locomotionPose(P, dt, ENEMY_GUARD, { noTrailSword: true });
       P.hips.y = -0.25; P.spine.x = -0.2; P.grip.set(-0.4, 0.8, -0.1); P.handL.set(0.35, 0.85, -0.1); P.head.x = 0.4;

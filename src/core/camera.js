@@ -53,8 +53,8 @@ export class CameraRig {
       const flat = Math.hypot(dx, dz);
       const wantPitch = clamp(0.18 + (this.lock.y - target.y) * -0.05 + (flat < 3 ? 0.08 : 0), 0.05, 0.45);
       this.pitch = damp(this.pitch, wantPitch, 3, realDt);
-    } else if (opts.assistYaw !== undefined && this.idleTime > 0.6) {
-      this.yaw = dampAngle(this.yaw, opts.assistYaw, 1.2, realDt);
+    } else if (opts.assistYaw !== undefined && this.idleTime > 0.7) {
+      this.yaw = dampAngle(this.yaw, opts.assistYaw, 0.9, realDt);
     }
 
     // pivot follows player with slight lag; vertical lags more (smooth jumps)

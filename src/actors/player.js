@@ -8,6 +8,9 @@ import { clamp, damp, dampAngle, lerp, wrapAngle, rand, segSegDistSq, ease } fro
 
 const GUARD = { g: [-0.2, 1.1, 0.33], b: [0.25, 0.55, 0.8], l: [0.16, 1.14, 0.22], tw: -0.15, hy: -0.03 };
 const RUN = 6.8, SPRINT = 9.4, JUMP = 7.8, DJUMP = 7.4;
+const LUNGE = 6.5;          // freeflow strike reach with the stick aimed
+const GUARD_MAX = 100;
+const KNIVES = 3;
 const COMBO_CHAIN = ['l1', 'l2', 'l3', 'l4'];
 
 export class Player extends Character {
@@ -72,6 +75,13 @@ export class Player extends Character {
     this.setState('move');
     this.scarf.initialized = false;
     this.lowHpBeat = 0;
+    this.guard = GUARD_MAX;
+    this.guardIdle = 0;
+    this.knives = KNIVES;
+    this.knifeRegen = 0;
+    this.specialAt = 8;
+    this.parryFatigue = 0;
+    this.lateHit = null;
   }
 
   get busy() { return ['execute', 'dead'].includes(this.state); }
@@ -95,8 +105,12 @@ export class Player extends Character {
     this.invuln -= dt;
     this.deflectT -= dt;
     this.comboTimer -= dt;
-    this.fumbleT = (this.fumbleT || 0) - dt;
-    if (this.comboTimer <= 0 && this.combo > 0) { this.combo = 0; g.hud.comboEnd(); }
+    this.parryFatigue = Math.max(0, this.parryFatigue - dt);
+    if (this.comboTimer <= 0 && this.combo > 0) { this.combo = 0; this.specialAt = 8; g.hud.comboEnd(); }
+    // guard recovers when you stop blocking; knives trickle back
+    this.guardIdle += dt;
+    if (this.state !== 'block' && this.guardIdle > 0.7) this.guard = Math.min(GUARD_MAX, this.guard + 26 * dt);
+    if (this.knives < KNIVES) { this.knifeRegen += dt; if (this.knifeRegen > 2.2) { this.knifeRegen = 0; this.knives++; } }
     if (this.state === 'dodge') this.iframes -= dt;
     this.bladeBlood = Math.max(0, this.bladeBlood - dt * 0.02);
 
@@ -132,6 +146,11 @@ export class Player extends Character {
       }
     }
 
+    // a parry pressed a split second after getting hit is honoured, whatever state the hit put us in
+    if (this.lateHit && g.time.real - this.lateHit.t < 0.1 && inp.peek('parry', 0.1) && this.state !== 'execute') {
+      inp.take('parry', 0.1);
+      this.startParry();
+    }
     let gravity = 24;
     switch (this.state) {
       case 'move': this.stMove(dt, mv, mag); break;
@@ -144,11 +163,9 @@ export class Player extends Character {
       case 'dodge': gravity = this.stDodge(dt, mv, mag); break;
       case 'vault': gravity = this.stVault(dt); break;
       case 'hit': this.stHit(dt); break;
-      case 'down': this.stDown(dt); break;
       case 'mantle': gravity = this.stMantle(dt); break;
-      case 'charge': this.stCharge(dt); break;
-      case 'slam': gravity = this.stSlam(dt); break;
       case 'plunge': gravity = this.stPlunge(dt); break;
+      case 'guardbreak': this.stGuardBreak(dt); break;
       case 'execute': this.body.vel.set(0, 0, 0); break;
       case 'art': gravity = this.stArt(dt); break;
     }
@@ -160,7 +177,7 @@ export class Player extends Character {
     if (this.body.grounded) { this.coyote = 0.1; this.airAttacks = 0; this.doubleJumped = false; this.airDashed = false; }
     else this.coyote -= dt;
 
-    this.anim.footMode = (['dash', 'vault', 'mantle', 'slam', 'plunge', 'art'].includes(this.state) || !this.body.grounded) ? 'air' : 'gait';
+    this.anim.footMode = (['dash', 'vault', 'mantle', 'plunge', 'art'].includes(this.state) || !this.body.grounded) ? 'air' : 'gait';
     this.anim.combatStance = this.combat && this.state !== 'move' ? true : this.combat;
     this.updateLean(dt);
     // head look toward target
@@ -198,6 +215,7 @@ export class Player extends Character {
     if (!inp.isHeld('dodge')) this.sprint = false;
     let speed = this.sprint && mag > 0.5 ? SPRINT : RUN * (mag < 0.6 ? mag * 0.8 : mag);
     if (this.lock && !this.sprint) speed = Math.min(speed, 4.6);
+    if (this.anim.clip === PLAYER.throwKnife) { speed *= 0.6; this.updateThrow(); }
     this.groundMove(dt, mv, mag, speed);
     if (this.tryActions(mv, mag)) return;
     if (!this.body.grounded && this.coyote <= 0) this.setState('air');
@@ -205,15 +223,34 @@ export class Player extends Character {
 
   tryActions(mv, mag, allowJump = true) {
     const inp = this.game.input;
-    if (inp.take('parry')) { this.startParry(); return true; }
+    if (inp.take('parry', 0.15)) { this.startParry(); return true; }
     if (inp.take('dodge', 0.12)) { this.startDodge(mv, mag); return true; }
     if (allowJump && inp.take('jump') && (this.body.grounded || this.coyote > 0)) { this.jump(); return true; }
-    if (this.fumbleT > 0) { inp.take('light'); }
-    else if (inp.take('light', 0.22)) { this.startAttack('light', mv, mag); return true; }
-    if (inp.take('heavy', 0.22)) { this.startAttack('heavy', mv, mag); return true; }
-    if (inp.take('kick', 0.2)) { this.startAttack('kick', mv, mag); return true; }
+    if (inp.take('light', 0.25)) { this.startAttack('light', mv, mag); return true; }
+    if (inp.take('heavy', 0.25)) { this.startAttack('heavy', mv, mag); return true; }
+    if (inp.take('throw', 0.2)) { this.startThrow(mv, mag); return false; }
     if (inp.take('art', 0.2)) { return this.startArt(mv, mag); }
     return false;
+  }
+
+  // ---------- throwing knives (quick-fire, interrupts wind-ups) ----------
+  startThrow(mv, mag) {
+    const g = this.game;
+    if (this.knives <= 0) { g.audio.play('combo_tick', { volume: 0.6, rate: 0.6 }); return; }
+    const dir = mag > 0.2 ? _dir : null;
+    this.throwTarget = this.lock && this.lock.alive && this.distTo(this.lock) < 18 ? this.lock : (this.selectTarget(16, dir, false, 0.5) || this.selectTarget(16, null, true, 0.45));
+    if (this.throwTarget) this.yaw = this.yawTo(this.throwTarget.body.pos.x, this.throwTarget.body.pos.z);
+    this.knives--;
+    this.knifeRegen = 0;
+    this.thrown = false;
+    this.anim.playClip(PLAYER.throwKnife, { blendIn: 0.03, speed: 1.15 });
+  }
+  updateThrow() {
+    if (this.thrown || this.anim.clip !== PLAYER.throwKnife) return;
+    if (this.anim.clipT >= PLAYER.throwKnife.releaseAt) {
+      this.thrown = true;
+      this.game.playerThrowKnife(this, this.throwTarget);
+    }
   }
 
   // ---------- Blood Art: Crimson Rend ----------
@@ -302,8 +339,10 @@ export class Player extends Character {
       this.game.audio.play('whoosh_spin', { pos: b.pos, volume: 0.5, rate: 1.3 });
     }
     if (inp.take('light', 0.2) && this.airAttacks < 3) { this.anim.flip = 0; this.startAttack('light', mv, mag); return 24; }
-    if (inp.take('heavy', 0.2)) { this.anim.flip = 0; this.startPlunge(); return 24; }
-    if (inp.take('parry')) { this.anim.flip = 0; this.startParry(); return 24; }
+    if (inp.take('art', 0.2) || inp.take('heavy', 0.2)) { this.anim.flip = 0; this.startPlunge(); return 24; }
+    if (inp.take('parry', 0.15)) { this.anim.flip = 0; this.startParry(); return 24; }
+    if (inp.take('throw', 0.2)) this.startThrow(mv, mag);
+    if (this.anim.clip === PLAYER.throwKnife) this.updateThrow();
     if (inp.take('dodge', 0.12) && !this.airDashed) { this.anim.flip = 0; this.airDashed = true; this.startDodge(mv, mag, true); return 0; }
     // ledge mantle
     if (b.vel.y < 4 && this.tryMantle(mv, mag)) return 24;
@@ -350,7 +389,6 @@ export class Player extends Character {
     if (s > 9) this.game.fx.dustPuff(this.body.pos, 8);
     if (this.state === 'air') this.setState('move');
     if (this.state === 'attack' && this.clip && this.clip.air) { this.anim.stopClip(0.12); this.setState('move'); }
-    if (this.state === 'slam') this.slamImpact();
     if (this.state === 'plunge') this.plungeImpact();
   }
 
@@ -396,23 +434,28 @@ export class Player extends Character {
     const g = this.game;
     const inAir = !this.body.grounded;
     const dir = mag > 0.2 ? _dir : null;
-    const lunge = inAir ? 4.0 : kind === 'heavy' ? 3.6 : 4.6;
+    const reachMax = inAir ? 5 : kind === 'heavy' ? 4.5 : LUNGE;
     let target = null;
-    if (this.lock && this.lock.alive && this.distTo(this.lock) < lunge + 0.4) {
+    if (this.lock && this.lock.alive && this.distTo(this.lock) < reachMax + 0.5) {
       // locked: stay on the lock unless the stick clearly aims elsewhere
       const dx = this.lock.body.pos.x - this.body.pos.x, dz = this.lock.body.pos.z - this.body.pos.z;
       const away = dir && (dx * dir.x + dz * dir.z) / Math.hypot(dx, dz) < -0.2;
-      target = away ? this.selectTarget(lunge, dir) : this.lock;
-    } else target = dir ? this.selectTarget(lunge, dir) : this.selectTarget(2.6, null, false, 1.1);
+      target = away ? this.selectTarget(reachMax, dir, false, 0.8) : this.lock;
+    } else target = dir ? this.selectTarget(reachMax, dir, false, 0.8) : this.selectTarget(3.5, null, false, 1.2);
     this.target = target;
 
-    // executions (heavy on an open enemy, or any heavy at full focus)
-    if (kind === 'heavy' && target && !inAir && this.distTo(target) < 4.5) {
-      if (target.canBeExecuted() || (this.focus >= 100 && !target.isBoss)) {
-          if (this.focus >= 100 && !target.canBeExecuted()) this.focus = 0;
+    if (kind === 'heavy' && target && !inAir && this.distTo(target) < 4.6 && !target.isBoss) {
+      // special takedown: an 8-hit freeflow chain earns an instant execution on anyone
+      if (this.combo >= this.specialAt) {
+        this.specialAt = this.combo + 8;
+        g.hud.popup('TAKEDOWN', target.headPos(_mc), '#ffd27a');
         g.execute(this, target);
         return;
       }
+    }
+    if (kind === 'heavy' && target && !inAir && this.distTo(target) < 4.6 && target.canBeExecuted()) {
+      g.execute(this, target);
+      return;
     }
     // attacking into empty space turns you toward the stick
     if (!target && dir) this.yaw = Math.atan2(dir.x, dir.z);
@@ -424,23 +467,20 @@ export class Player extends Character {
       return;
     }
     let clip;
-    if (kind === 'kick') clip = PLAYER.kick;
-    else if (kind === 'heavy') clip = PLAYER.heavy;
+    if (kind === 'heavy') clip = PLAYER.heavy;
     else if (inAir) {
       if (this.airAttacks >= 3) return;
       clip = this.airAttacks % 2 === 0 ? PLAYER.air1 : PLAYER.air2;
       this.airAttacks++;
-    }
-    else {
-      if (g.time.game - this.lastAttackT > 0.65) this.comboStep = 0;
+    } else {
+      if (g.time.game - this.lastAttackT > 0.7) this.comboStep = 0;
       clip = PLAYER[COMBO_CHAIN[this.comboStep % 4]];
-      // variety: long distance targets get a thrust, every so often swap in a thrust mid-chain
-      if (target && this.distTo(target) > 3.4 && this.comboStep !== 3) clip = PLAYER.thrust;
+      if (target && this.distTo(target) > 3.6 && this.comboStep !== 3) clip = PLAYER.thrust;
       this.comboStep = (this.comboStep + 1) % 4;
     }
     this.lastAttackT = g.time.game;
-    const reach = kind === 'kick' ? 1.5 : 1.85;
-    if (target && this.distTo(target) > reach + 0.25 && Math.abs(target.body.pos.y - this.body.pos.y) < 2.5) {
+    const range = clip.range ?? 1.15;
+    if (target && (this.distTo(target) > range + 0.6 || Math.abs(target.body.pos.y - this.body.pos.y) > 0.6)) {
       this.startDash(clip, target, kind);
       return;
     }
@@ -450,7 +490,6 @@ export class Player extends Character {
   playAttack(clip, target, startAt = 0) {
     this.clip = clip;
     this.setState('attack');
-    this.mash = 0;
     this.perfectSwing = !!this.rhythm;
     this.rhythm = false;
     this.hitSet.clear();
@@ -464,30 +503,35 @@ export class Player extends Character {
     if (clip.hop) this.body.vel.y = clip.hop;
     if (clip.air) this.body.vel.y = Math.max(this.body.vel.y, this.airAttacks <= 1 ? 2.4 : 0.6);
     if (target) this.yaw = dampAngle(this.yaw, this.yawTo(target.body.pos.x, target.body.pos.z), 30, 0.05);
-    this.heavyHeldCheck = clip === PLAYER.heavy;
   }
 
   attackSpeed() {
     return 1 + Math.min(this.combo, 25) * 0.012;
   }
 
+  // Freeflow lunge: closes the gap fast, leaping up to / down from platforms when needed.
   startDash(clip, target, kind) {
     this.setState('dash');
     this.clip = clip;
     this.dashTarget = target;
     this.dashKind = kind;
     const d = this.distTo(target);
-    this.dashDur = clamp((d - 1.35) / 13, 0.06, 0.26);
-    this.dashFrom = this.body.pos.clone();
+    const dy = target.body.pos.y - this.body.pos.y;
+    this.dashDur = clamp((d - 1.3) / 15, 0.08, 0.34) + (Math.abs(dy) > 0.6 ? 0.12 : 0);
     const chamberT = clip.keys[1].t;
-    this.anim.playClip(clip, { speed: chamberT / Math.max(0.06, this.dashDur * 0.85), blendIn: 0.04 });
+    this.anim.playClip(clip, { speed: chamberT / Math.max(0.06, this.dashDur * 0.8), blendIn: 0.04 });
     this.anim.airFeet = [_lf.set(0.13, 0.12, 0.38), _rf.set(-0.13, 0.25, -0.35)];
-    if (!this.body.grounded) this.body.vel.y = Math.max(this.body.vel.y, 1.5);
+    // ballistic hop so we arrive at the target's height (or a flying strike on long gaps)
+    const T = this.dashDur;
+    if (dy > 0.4) this.body.vel.y = (dy + 0.35) / T + 0.5 * 24 * T;
+    else if (d > 4 || !this.body.grounded) this.body.vel.y = Math.max(this.body.vel.y, 2.5 + d * 0.25);
+    this.body.grounded = false;
     this.game.audio.play('dodge', { pos: this.body.pos, volume: 0.45, rate: 1.4 });
-    this.game.camRig.zoomKick(-2.5);
+    this.game.camRig.zoomKick(-2);
   }
 
   stDash(dt) {
+    if (this.game.input.take('parry', 0.15)) { this.anim.airFeet = null; this.startParry(); return 24; }
     const t = this.dashTarget;
     const chamberT = this.clip.keys[1].t;
     if (this.anim.clipT > chamberT) this.anim.clipT = chamberT;
@@ -495,18 +539,19 @@ export class Player extends Character {
     const dx = t.body.pos.x - this.body.pos.x, dz = t.body.pos.z - this.body.pos.z;
     const d = Math.hypot(dx, dz);
     this.yaw = dampAngle(this.yaw, Math.atan2(dx, dz), 30, dt);
-    const stopAt = (this.clip.range ?? 1.15) + 0.25 + (t.rig.scale - 1) * 0.3;
-    const speed = Math.max(9, (d - stopAt) / Math.max(0.03, this.dashDur - this.stateT + 0.02));
-    const sp = Math.min(speed, 15);
-    this.body.vel.x = (dx / d) * sp;
-    this.body.vel.z = (dz / d) * sp;
+    const stopAt = (this.clip.range ?? 1.15) + 0.2 + (t.rig.scale - 1) * 0.3;
+    const remain = Math.max(0.03, this.dashDur - this.stateT + 0.02);
+    const sp = clamp((d - stopAt) / remain, 0, 17);
+    this.body.vel.x = (dx / Math.max(d, 1e-3)) * sp;
+    this.body.vel.z = (dz / Math.max(d, 1e-3)) * sp;
     this.anim.bodyTilt.x = damp(this.anim.bodyTilt.x, 0.35, 12, dt);
-    if (d <= stopAt + 0.15 || this.stateT > this.dashDur + 0.12 || this.body.wallHit) {
+    const arrived = d <= stopAt + 0.12 && (this.body.grounded || Math.abs(t.body.pos.y - this.body.pos.y) < 0.5 || this.body.vel.y < 0);
+    if (arrived || this.stateT > this.dashDur + 0.25 || (this.body.wallHit && this.stateT > 0.05)) {
       this.body.vel.x *= 0.25; this.body.vel.z *= 0.25;
       this.anim.airFeet = null;
       this.playAttack(this.clip, t, chamberT);
     }
-    return this.body.grounded ? 24 : 14;
+    return this.body.grounded ? 24 : 20;
   }
 
   stAttack(dt, mv, mag) {
@@ -514,11 +559,6 @@ export class Player extends Character {
     const clip = this.clip;
     const t = this.anim.clip === clip ? this.anim.clipT : 99;
     const b = this.body;
-    // heavy charge
-    if (this.heavyHeldCheck && t > 0.16) {
-      this.heavyHeldCheck = false;
-      if (inp.isHeld('heavy') && b.grounded) { this.startCharge(); return 24; }
-    }
     // root motion lunge (stops short of target)
     if (clip.lunge && t >= clip.lunge[0] && t <= clip.lunge[1]) {
       const span = clip.lunge[1] - clip.lunge[0];
@@ -556,37 +596,23 @@ export class Player extends Character {
     // gravity during air attacks
     let grav = 24;
     if (clip.air) { grav = 5; if (b.vel.y < -1) b.vel.y = damp(b.vel.y, -1, 10, dt); }
-    // cancels — strikes must be timed: presses well before the window are thrown away,
-    // and mashing (2+ early presses) kills the chain for this swing.
+    // parry always cuts through your own swing — the counter never gets eaten by an attack animation
+    if (inp.take('parry', 0.15)) { this.startParry(); return grav; }
+    // next strike is buffered and fires the moment the swing's cancel window opens
     const afterHit = !clip.hit || t > clip.hit[1];
     const cancelT = clip.cancel ?? clip.dur;
-    if (t < cancelT - 0.13 && inp.peek('light', 0.03)) {
-      inp.take('light');
-      this.mash = (this.mash || 0) + 1;
-      if (this.mash === 2 && !this.mashHinted) { this.mashHinted = true; g.hud.hint('Time your strikes · mashing breaks the chain', 3.5); }
-    }
-    if (t >= cancelT && (this.mash || 0) < 2) {
-      if (inp.peek('light', 0.3) || inp.peek('heavy', 0.3) || inp.peek('kick', 0.3) || inp.peek('art', 0.3)) {
-        this.rhythm = inp.peek('light', 0.3) && (t - cancelT) < 0.16;
+    if (t >= cancelT) {
+      if (inp.peek('light', 0.45) || inp.peek('heavy', 0.45) || inp.peek('throw', 0.3) || inp.peek('art', 0.35)) {
+        this.rhythm = inp.peek('light', 0.45) && (t - cancelT) < 0.14;
         if (this.tryActions(mv, mag, false)) return grav;
       }
     }
-    if (afterHit || t < (clip.hit ? clip.hit[0] - 0.05 : 0)) {
-      if (inp.peek('dodge', 0.12) || inp.peek('parry', 0.12)) {
-        if (inp.take('parry')) { this.startParry(); return grav; }
-        if (inp.take('dodge', 0.12)) { this.startDodge(mv, mag, !b.grounded); return grav; }
-      }
+    if (afterHit || t < (clip.hit ? clip.hit[0] - 0.04 : 0)) {
+      if (inp.take('dodge', 0.12)) { this.startDodge(mv, mag, !b.grounded); return grav; }
       if (afterHit && b.grounded && inp.take('jump', 0.12)) { this.jump(); return grav; }
     }
     if (t >= clip.dur - 0.12 || this.anim.clip !== clip) {
       this.trailOn = false;
-      if ((this.mash || 0) >= 2) {
-        // overswung: a beat to recover your footing
-        this.fumbleT = 0.32;
-        this.anim.flinch.v -= 4;
-        this.anim.twist.v += 6;
-        inp.take('light');
-      }
       this.setState(b.grounded ? 'move' : 'air');
       this.anim.stopClip(0.18);
     }
@@ -603,19 +629,12 @@ export class Player extends Character {
       const S = e.rig.scale;
       _ea.copy(e.body.pos).setY(e.body.pos.y + 0.3 * S);
       _eb.copy(e.body.pos).setY(e.body.pos.y + 1.72 * S);
-      const rad = (clip.kick ? 0.3 : 0.22) * S + 0.03;
+      const rad = 0.22 * S + 0.03;
       let hitS = -1, best = 1e9;
       for (let k = 0; k <= 6; k++) {
         const s = k / 6;
-        if (clip.kick) {
-          // kicks connect with the foot, not the sword
-          this.rig.bones['shin.R'].getWorldPosition(_sa);
-          this.rig.bones['foot.R'].getWorldPosition(_sb);
-          _sb.addScaledVector(this.forward(_sw), 0.12);
-        } else {
-          _sa.lerpVectors(r0b, r1b, s);
-          _sb.lerpVectors(r0t, r1t, s);
-        }
+        _sa.lerpVectors(r0b, r1b, s);
+        _sb.lerpVectors(r0t, r1t, s);
         const d2 = segSegDistSq(_sa, _sb, _ea, _eb, _ca, _cb);
         if (d2 < best) { best = d2; _bca.copy(_ca); _bcb.copy(_cb); }
         if (d2 < rad * rad) { hitS = s; _bca.copy(_ca); _bcb.copy(_cb); break; }
@@ -630,13 +649,13 @@ export class Player extends Character {
       const point = _pt.copy(_bcb);
       if (ol > 1e-4) point.addScaledVector(off, Math.min(ol, rad * 0.9) / ol);
       const dir = _sw.subVectors(r1t, r0t);
-      if (dir.lengthSq() < 1e-6 || clip.kick) this.forward(dir);
+      if (dir.lengthSq() < 1e-6) this.forward(dir);
       dir.normalize();
       firstS = Math.min(firstS, hitS);
       g.playerHits(this, e, clip, point, dir);
     }
     // freeze on the exact frame the steel meets the body
-    if (firstS <= 1 && !clip.kick) {
+    if (firstS <= 1) {
       this.rewindToContact(firstS);
       if (firstS < 1) this.trail.samples.pop(); // don't let the trail fold back over the rewind
     }
@@ -653,123 +672,113 @@ export class Player extends Character {
     }
   }
 
-  // ---------- charge / slam / plunge ----------
-  startCharge() {
-    this.setState('charge');
-    this.anim.clipSpeed = 0;
-    this.chargeT = 0;
-    this.game.audio.play('fire_ignite', { pos: this.body.pos, volume: 0.25, rate: 1.6 });
-  }
-  stCharge(dt) {
-    const g = this.game;
-    this.chargeT += dt;
-    this.body.vel.x = damp(this.body.vel.x, 0, 12, dt);
-    this.body.vel.z = damp(this.body.vel.z, 0, 12, dt);
-    const tgt = this.selectTarget(9, null);
-    if (tgt) this.faceTo(tgt.body.pos.x, tgt.body.pos.z, 8, dt);
-    this.anim.flinch.x = Math.sin(this.chargeT * 40) * 0.08 * Math.min(1, this.chargeT * 2);
-    if (this.chargeT > 0.25) g.fx.emberBurst(this.bladeTip, 1, 0.05);
-    if (!g.input.isHeld('heavy') || this.chargeT > 0.9) {
-      if (this.chargeT > 0.3) this.startSlam(tgt);
-      else { this.anim.clipSpeed = 1; this.setState('attack'); this.clip = PLAYER.heavy; this.stateT = 0.18; }
-    }
-  }
-  startSlam(tgt) {
-    this.setState('slam');
-    const d = tgt ? Math.min(this.distTo(tgt), 7) : 3;
-    const flight = 0.62;
-    this.body.vel.y = 9.5;
-    const sp = Math.max(2, d / flight);
-    this.body.vel.x = Math.sin(this.yaw) * sp;
-    this.body.vel.z = Math.cos(this.yaw) * sp;
-    this.body.grounded = false;
-    this.anim.clipSpeed = 0;
-    this.game.audio.play('whoosh_heavy', { pos: this.body.pos, rate: 0.8 });
-    this.flipT = 0;
-  }
-  stSlam(dt) {
-    this.flipT += dt;
-    this.anim.flip = -Math.PI * 2 * ease.inOut(Math.min(1, this.flipT / 0.55));
-    if (this.flipT > 0.55) this.anim.flip = 0;
-    return 30;
-  }
-  slamImpact() {
-    const g = this.game;
-    this.anim.flip = 0;
-    this.body.vel.set(0, 0, 0);
-    this.clip = PLAYER.heavy;
-    this.anim.clipSpeed = 1.3;
-    this.anim.clipT = 0.27;
-    this.setState('attack');
-    this.stateT = 0.3;
-    this.hitSet.clear();
-    this.whooshed = true;
-    g.aoe(this, this.body.pos, 3.4, 42, 'slam');
-  }
+  // ---------- ground pound ----------
+  // Hang for a beat, then drive the blade into the ground: shockwave that launches everyone nearby.
   startPlunge() {
     this.setState('plunge');
     this.anim.playClip(PLAYER.plunge, { blendIn: 0.05 });
-    this.body.vel.y = Math.min(this.body.vel.y, 4);
+    this.body.vel.y = Math.max(Math.min(this.body.vel.y, 3), 1.5);
     this.body.vel.x *= 0.3; this.body.vel.z *= 0.3;
+    // steer slightly toward an enemy below
+    const t = this.selectTarget(3.5, null, true, 1.4);
+    if (t && t.body.pos.y < this.body.pos.y) { this.body.vel.x = (t.body.pos.x - this.body.pos.x) * 2.5; this.body.vel.z = (t.body.pos.z - this.body.pos.z) * 2.5; }
     this.trailOn = true;
+    this.game.audio.play('whoosh_heavy', { pos: this.body.pos, rate: 0.75 });
   }
   stPlunge(dt) {
-    if (this.stateT > 0.12) this.body.vel.y = Math.min(this.body.vel.y, -24);
-    else this.body.vel.y = damp(this.body.vel.y, 1, 10, dt);
-    return this.stateT > 0.12 ? 60 : 4;
+    if (this.stateT > 0.13) this.body.vel.y = Math.min(this.body.vel.y, -28);
+    else this.body.vel.y = damp(this.body.vel.y, 0.5, 12, dt);
+    this.anim.bodyTilt.x = damp(this.anim.bodyTilt.x, 0.25, 10, dt);
+    return this.stateT > 0.13 ? 70 : 3;
   }
   plungeImpact() {
     const g = this.game;
     this.trailOn = false;
-    this.anim.stopClip(0.25);
+    this.anim.stopClip(0.3);
     this.setState('hit');
-    this.hitRecover = 0.35;
-    this.invuln = 0.3;
-    g.aoe(this, this.body.pos, 2.6, 46, 'plunge');
+    this.hitRecover = 0.32;
+    this.invuln = 0.35;
+    this.anim.land.v += 7;
+    g.groundPound(this, this.body.pos.clone());
   }
 
-  // ---------- defense ----------
+  // ---------- defense: L2 tap = timed parry, hold = block (drains guard) ----------
   startParry() {
-    if (this.parryCD > 0 && this.state === 'parry') return;
+    const g = this.game;
+    // a hit that landed a split second ago still counts: turn it into the parry it should have been
+    const lh = this.lateHit;
+    if (lh && g.time.real - lh.t < 0.1 && lh.enemy.alive && !lh.info.heavy && !lh.info.ranged) {
+      this.hp = Math.min(this.maxHp, this.hp + lh.amount);
+      this.lateHit = null;
+      this.parryT = 0;
+      this.setState('parry');
+      const r = this.receiveStrike(lh.enemy, lh.info);
+      if (r === 'parried') g.resolveParryFx(lh.enemy, lh.info);
+      return;
+    }
+    if (this.state === 'parry' && this.stateT < 0.1) return;
     this.setState('parry');
-    this.parryT = 0;
-    this.parryCD = 0.12;
-    this.anim.playClip(PLAYER.parry, { blendIn: 0.03, speed: 1.2 });
+    // spamming shortens the window
+    this.parryT = this.parryFatigue > 0 ? 0.16 : 0;
+    this.parryFatigue = 0.45;
+    this.anim.playClip(PLAYER.parry, { blendIn: 0.03, speed: 1.3 });
     this.trailOn = false;
+    this.guardIdle = 0;
   }
   stParry(dt, mv, mag) {
     const inp = this.game.input;
-    this.groundMove(dt, mv, mag, 1.2, 30, 6);
+    this.groundMove(dt, mv, mag, 1.6, 30, 6);
     this.faceThreat(dt);
-    if (this.stateT > 0.36) {
-      if (inp.isHeld('parry')) { this.setState('block'); this.anim.playClip(PLAYER.block, { blendIn: 0.08 }); }
+    // the parry stance outlasts the widest parry window, so a timed press never drops you out early
+    if (this.stateT > 0.46) {
+      if (inp.isHeld('parry') && this.guard > 0) { this.setState('block'); this.anim.playClip(PLAYER.block, { blendIn: 0.08 }); }
       else { this.setState('move'); this.anim.stopClip(0.15); }
+      return;
     }
-    if (this.stateT > 0.22) {
-      if (inp.take('light', 0.15)) { this.startAttack('light', mv, mag); return; }
+    if (this.stateT > 0.14) {
+      if (inp.take('light', 0.2)) { this.startAttack('light', mv, mag); return; }
       if (inp.take('dodge', 0.12)) { this.startDodge(mv, mag); return; }
     }
   }
   stBlock(dt, mv, mag) {
     const inp = this.game.input;
-    this.groundMove(dt, mv, mag, 1.8, 30, 6);
+    this.groundMove(dt, mv, mag, 2.2, 30, 6);
     this.faceThreat(dt);
+    // holding drains guard: you can't turtle forever
+    this.guard -= 9 * dt;
+    this.guardIdle = 0;
+    if (this.guard <= 0) { this.guardBreak(); return; }
     if (!inp.isHeld('parry')) { this.setState('move'); this.anim.stopClip(0.15); return; }
-    if (inp.take('light', 0.15)) { this.startAttack('light', mv, mag); return; }
+    if (inp.take('light', 0.2)) { this.startAttack('light', mv, mag); return; }
+    if (inp.take('heavy', 0.2)) { this.startAttack('heavy', mv, mag); return; }
     if (inp.take('dodge', 0.12)) { this.startDodge(mv, mag); return; }
-    if (inp.take('kick', 0.15)) { this.startAttack('kick', mv, mag); return; }
+  }
+  guardBreak() {
+    const g = this.game;
+    this.guard = 0;
+    this.setState('guardbreak');
+    this.anim.playClip(PLAYER.deflect, { blendIn: 0.03, speed: 0.6 });
+    this.anim.hit(0, -1, 1.4);
+    g.hud.popup('GUARD BROKEN', this.headPos(_mc), '#ff5a3a');
+    g.audio.play('parry', { pos: this.body.pos, rate: 0.55 });
+    g.camRig.shake(0.3);
+  }
+  stGuardBreak(dt) {
+    this.body.vel.x = damp(this.body.vel.x, 0, 6, dt);
+    this.body.vel.z = damp(this.body.vel.z, 0, 6, dt);
+    if (this.stateT > 0.85) { this.guard = 30; this.setState('move'); this.anim.stopClip(0.2); }
   }
   stDeflect(dt, mv, mag) {
     const inp = this.game.input;
     this.body.vel.x = damp(this.body.vel.x, 0, 10, dt);
     this.body.vel.z = damp(this.body.vel.z, 0, 10, dt);
     if (this.parried && this.parried.alive) this.faceTo(this.parried.body.pos.x, this.parried.body.pos.z, 14, dt);
-    if (inp.take('parry')) { this.startParry(); return; }
-    if (this.stateT > 0.06) {
-      if (inp.take('light', 0.3)) { this.startAttack('light', mv, mag); return; }
-      if (inp.take('heavy', 0.3)) { this.startAttack('heavy', mv, mag); return; }
+    if (inp.take('parry', 0.15)) { this.parryFatigue = 0; this.startParry(); return; }
+    if (this.stateT > 0.05) {
+      if (inp.take('light', 0.35)) { this.startAttack('light', mv, mag); return; }
+      if (inp.take('heavy', 0.35)) { this.startAttack('heavy', mv, mag); return; }
       if (inp.take('dodge', 0.12)) { this.startDodge(mv, mag); return; }
-      if (inp.take('kick', 0.2)) { this.startAttack('kick', mv, mag); return; }
+      if (inp.take('throw', 0.2)) this.startThrow(mv, mag);
     }
     if (this.stateT > 0.32) { this.setState(inp.isHeld('parry') ? 'block' : 'move'); if (this.state === 'block') this.anim.playClip(PLAYER.block, { blendIn: 0.08 }); else this.anim.stopClip(0.2); }
   }
@@ -813,29 +822,34 @@ export class Player extends Character {
     if (!this.alive) return 'miss';
     if (this.state === 'execute' || this.invuln > 0 || this.state === 'vault' || this.state === 'art') return 'dodged';
     if (this.state === 'dodge' && this.iframes > 0) { g.perfectDodge(this, enemy); return 'dodged'; }
-    const window = info.parryWindow ?? 0.32;
-    const canParry = !info.unblockable && (this.state === 'parry' || this.state === 'block' || this.state === 'deflect');
-    if (canParry && this.parryT <= window + 0.02) {
+    const window = info.parryWindow ?? 0.36;
+    const guarding = this.state === 'parry' || this.state === 'block' || this.state === 'deflect';
+    if (!info.unblockable && guarding && this.parryT <= window) {
       this.setState('deflect');
       this.parried = enemy;
-      this.deflectT = 0.85;
+      this.deflectT = 0.9;
+      this.parryFatigue = 0;
+      this.guard = Math.min(GUARD_MAX, this.guard + 20);
       this.faceTo(enemy.body.pos.x, enemy.body.pos.z, 1000, 1);
       if (info.contact) this.meetBlade(info.contact, info.edir, true);
       else this.anim.playClip(PLAYER.deflect, { blendIn: 0.02 });
       this.focus = Math.min(100, this.focus + 14);
       return 'parried';
     }
-    if (!info.unblockable && this.state === 'block' && info.perilous !== 'thrust') {
+    if (!info.unblockable && guarding && info.perilous !== 'thrust') {
+      // blocked: no damage, but it eats guard
       if (info.contact) this.meetBlade(info.contact, info.edir, false);
-      this.damage(info.dmg * (info.chip ?? 0.15), info, true);
+      this.guard -= info.dmg * 2.4;
+      this.guardIdle = 0;
       const away = _sw.subVectors(this.body.pos, enemy.body.pos).setY(0).normalize();
-      this.body.vel.addScaledVector(away, 3.2);
+      this.body.vel.addScaledVector(away, 3);
+      if (this.guard <= 0) { this.guardBreak(); this.damage(info.dmg * 0.4, info, true); }
       return 'blocked';
     }
-    if (!info.unblockable && (this.state === 'parry' || this.state === 'block') && this.parryT > window) {
-      this.game.hud.popup(this.parryT < window + 0.35 ? 'EARLY' : 'BLOCK LATE', this.headPos(_mc), '#ff8a6a', 0.7);
-    }
+    if (!info.unblockable && guarding && this.parryT > window) g.hud.popup('EARLY', this.headPos(_mc), '#ff8a6a', 0.7);
+    const before = this.hp;
     this.damage(info.dmg, info, false, enemy);
+    this.lateHit = { t: g.time.real, enemy, info, amount: before - this.hp };
     return 'hit';
   }
 
@@ -843,19 +857,18 @@ export class Player extends Character {
     const g = this.game;
     this.hp -= amount;
     if (!blocked) {
-      if (this.combo > 0) { this.combo = 0; g.hud.comboEnd(true); }
+      if (this.combo > 0) { this.combo = 0; this.specialAt = 8; g.hud.comboEnd(true); }
       const away = _sw.subVectors(this.body.pos, from ? from.body.pos : this.body.pos).setY(0);
       if (away.lengthSq() < 1e-4) this.forward(away).negate();
       away.normalize();
       const local = this.toLocal(away, _loc);
-      this.anim.hit(-local.x, -local.z, info.heavy ? 1.6 : 1);
-      this.body.vel.addScaledVector(away, info.heavy ? 7 : 4);
+      this.anim.hit(-local.x, -local.z, info.heavy ? 1.8 : 1.1);
+      this.body.vel.addScaledVector(away, info.heavy ? 6.5 : 3.5);
       this.trailOn = false;
-      const heavy = info.heavy || amount >= 25;
       if (this.hp > 0) {
         this.anim.stopClip(0.08);
-        if (heavy) { this.setState('down'); this.downDir = away.clone(); this.body.vel.y = 3; }
-        else { this.setState('hit'); this.hitRecover = 0.36; }
+        this.setState('hit');
+        this.hitRecover = info.heavy ? 0.55 : 0.32;
       }
     }
     if (this.hp <= 0) this.die(info, from);
@@ -866,22 +879,9 @@ export class Player extends Character {
     this.body.vel.z = damp(this.body.vel.z, 0, 7, dt);
     if (this.stateT > (this.hitRecover ?? 0.36)) this.setState(this.body.grounded ? 'move' : 'air');
     const inp = this.game.input;
-    if (this.stateT > 0.18 && inp.take('dodge', 0.15)) this.startDodge(this.moveVector(_mv), Math.min(1, _mv.length()));
+    if (this.stateT > 0.16 && inp.take('dodge', 0.15)) this.startDodge(this.moveVector(_mv), Math.min(1, _mv.length()));
+    if (this.stateT > 0.16 && inp.take('parry', 0.12)) this.startParry();
   }
-  stDown(dt) {
-    const t = this.stateT;
-    this.body.vel.x = damp(this.body.vel.x, 0, 4, dt);
-    this.body.vel.z = damp(this.body.vel.z, 0, 4, dt);
-    // fall back, lie, get up
-    const fall = Math.min(1, t / 0.28);
-    const rise = clamp((t - 0.75) / 0.35, 0, 1);
-    this.anim.flip = (-1.35 * ease.out(fall)) * (1 - ease.inOut(rise));
-    if (t > 0.25) this.invuln = 0.15;
-    const inp = this.game.input;
-    if (t > 0.5 && t < 0.75 && inp.take('dodge', 0.2)) { this.stateT = 0.75; }
-    if (t > 1.1) { this.anim.flip = 0; this.setState('move'); this.invuln = 0.25; }
-  }
-
   startDodge(mv, mag, air = false) {
     const g = this.game;
     const dir = mag > 0.2 ? _dd.copy(mv).normalize() : this.forward(_dd).negate();
@@ -919,11 +919,11 @@ export class Player extends Character {
     this.anim.bodyTilt.y = damp(this.anim.bodyTilt.y, this.dodgeLocal.x * 0.5, 20, dt);
     this.anim.hipsBob = -0.12 * Math.sin(Math.min(1, t / 0.3) * Math.PI);
     const inp = this.game.input;
+    if (t > 0.08 && inp.take('parry', 0.15)) { this.startParry(); return 24; }
     if (t > 0.16) {
       if (inp.take('light', 0.2)) { this.startAttack('light', mv, mag); return 24; }
-      if (inp.take('parry')) { this.startParry(); return 24; }
-      if (inp.take('kick', 0.2)) { this.startAttack('kick', mv, mag); return 24; }
       if (inp.take('jump', 0.15) && this.body.grounded) { this.jump(); return 24; }
+      if (inp.take('throw', 0.2)) this.startThrow(mv, mag);
     }
     if (t > 0.32) {
       if (inp.isHeld('dodge') && mag > 0.5) this.sprint = true;
@@ -980,7 +980,7 @@ export class Player extends Character {
   // ---------- pose ----------
   buildBasePose(P, dt) {
     const s = this.state;
-    if (s === 'air' || s === 'vault' || s === 'slam' || (s === 'dodge' && !this.body.grounded)) {
+    if (s === 'air' || s === 'vault' || (s === 'dodge' && !this.body.grounded)) {
       this.locomotionPose(P, dt, GUARD, { noTrailSword: true });
       const flipping = this.anim.flip !== 0;
       const up = this.body.vel.y;
@@ -992,7 +992,6 @@ export class Player extends Character {
       const tuck = flipping ? 1 : clamp(0.5 - up * 0.05, 0.1, 0.8);
       P.footL = _fl.set(0.12, 0.25 + tuck * 0.35, 0.18 + tuck * 0.1);
       P.footR = _fr.set(-0.12, 0.15 + tuck * 0.25, -0.12);
-      if (s === 'slam') { P.grip.set(-0.05, 1.85, -0.1); P.blade.set(0, 0.5, -0.86).normalize(); P.two = 1; }
       return;
     }
     if (s === 'mantle') {
@@ -1000,13 +999,6 @@ export class Player extends Character {
       P.grip.set(-0.3, 1.6, 0.3); P.blade.set(-0.3, 0.6, -0.7).normalize();
       P.handL.set(0.22, 1.7, 0.35);
       P.spine.x = 0.35; P.footL = _fl.set(0.12, 0.6, 0.25); P.footR = _fr.set(-0.12, 0.3, 0.05);
-      return;
-    }
-    if (s === 'down') {
-      this.locomotionPose(P, dt, GUARD, { noTrailSword: true });
-      P.grip.set(-0.45, 0.9, 0.1); P.blade.set(-0.6, -0.2, 0.75).normalize();
-      P.handL.set(0.4, 0.95, 0.0);
-      P.hips.y = -0.3;
       return;
     }
     this.locomotionPose(P, dt, GUARD);

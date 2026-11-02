@@ -16,23 +16,25 @@ Open http://localhost:5173 in Chrome. Click to start, which locks the mouse. A P
 | Action | Mouse & keyboard | DualSense |
 |---|---|---|
 | Move / camera | WASD / mouse | Left / right stick |
-| Light slash (combo) | LMB | □ |
-| Heavy cleave (hold for a leaping slam) | RMB | △ |
-| Parry (hold to block) | Q | L1 |
+| Strike (freeflow combo) | LMB | □ |
+| Heavy: breaks guards, executes opened enemies, special takedown at 8+ combo | RMB | △ |
+| Parry (tap) / block (hold; drains guard) | Q | L2 |
+| Throwing knife (interrupts wind-ups, 3 knives that regenerate) | F | R1 |
+| Blood Art on the ground / ground pound in the air | E | R2 |
 | Dodge (into an enemy to vault over them) | Shift | ○ |
 | Jump (double jump) | Space | ✕ |
-| Kick (breaks guards) | F | R1 |
-| Blood Art: Crimson Rend (costs one focus bar) | E | R2 |
-| Lock-on (hold / toggle) | Tab or MMB | L2 hold / R3 |
+| Lock-on (hold / toggle) | Tab or MMB | L1 hold / R3 |
 | Switch lock target | Swipe mouse | Flick right stick |
-| Execute an opened enemy | RMB | △ |
-| In the air: slash / plunge | LMB / RMB | □ / △ |
+
+Add `?mute=1` to the URL to start muted.
 
 ## How the combat works
 
-- **Timing matters more than speed.** Each slash has a window for the next input. If you press much earlier than that window, the press is dropped. Mashing ruins the chain and costs you a stumble. Pressing right on the beat gives a bonus hit (✦).
-- **Guards.** An enemy holding a raised blade or a shield blocks light slashes from the front. Break the guard with a kick, a heavy, a parry or a Blood Art. If you keep comboing one enemy, they recover, block and counter-attack. Those counters can't be interrupted, so parry them.
-- **Parry.** Press parry when an enemy's glint turns white. A parry opens the enemy up for a riposte or an execution. You can also parry thrown knives back at the thrower.
+- **Freeflow.** Strikes lunge to whoever you aim the stick at (up to ~6.5m), chaining across enemies. Presses are buffered so nothing is eaten; striking right on the beat gives a bonus hit (✦). An 8-hit chain unlocks a special takedown on △.
+- **Guards.** An enemy holding a raised blade or a shield blocks strikes and knives from the front. Break the guard with a heavy (△), a parry, a ground pound or a Blood Art. If you keep comboing one enemy, they recover, block and counter-attack. Those counters can't be interrupted, so parry them.
+- **Knives (R1)** interrupt an enemy mid wind-up and stick in them. **Ground pound (R2 in the air)** launches everyone around you, and landing right on someone impales them.
+- **Verticality.** A low dais, four stone plinths with steps and two broken pillars give you high ground. Strikes leap up to or drop down onto targets at other heights, and enemies jump up after you.
+- **Parry and block.** Tap L2 as an enemy's glint turns white. A parry opens the enemy up for a riposte (□) or an execution (△). The window runs from about 0.4s before the blade lands to a hair after it (a press that comes just late still counts). Holding L2 blocks, but every blocked hit and every second you hold drains your guard meter; when it empties your guard breaks and you're open. You can also parry thrown knives back at the thrower.
 - **Red glints** can't be parried. Dodge or jump them. A last-instant dodge slows time and opens up the attacker.
 - **Counter-hits.** Hitting an enemy early in their wind-up interrupts them and does extra damage. Once they've committed to the swing, it lands unless you parry or dodge.
 - **Focus** fills when you land hits, parry, perfect-dodge and execute. Each bar spends on a Blood Art dash that cuts through everyone in a line. Blood Art unlocks after wave 1.

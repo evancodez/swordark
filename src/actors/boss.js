@@ -4,7 +4,7 @@ import { Cloth } from './cloth.js';
 import { BOSS, BOSS_GUARD } from './clips.js';
 import { clamp, damp, rand, pick, ease } from '../core/math.js';
 
-TYPES.boss = { look: 'boss', hp: 1100, sword: 'boss', scale: 1.14, speed: 4.4, parryWindow: 0.19, attacks: [] };
+TYPES.boss = { look: 'boss', hp: 1100, sword: 'boss', scale: 1.14, speed: 4.4, parryWindow: 0.26, attacks: [] };
 
 const P1 = [
   ['slashR', 'slashL'],
@@ -59,7 +59,7 @@ export class Boss extends Enemy {
 
   get isBoss() { return true; }
   canBeExecuted() { return this.alive && (this.state === 'broken' || this.state === 'finished'); }
-  parryWindow() { return this.clip && this.clip.perilous === 'thrust' ? 0.14 : this.T.parryWindow; }
+  parryWindow() { return this.clip && this.clip.perilous === 'thrust' ? 0.18 : this.T.parryWindow; }
 
   // Override the think step entirely
   stThink(dt) { this.stGuard(dt); }
@@ -129,7 +129,8 @@ export class Boss extends Enemy {
     b.vel.x += clamp(tx * speed - b.vel.x, -acc, acc);
     b.vel.z += clamp(tz * speed - b.vel.z, -acc, acc);
     if (this.guardT <= 0) {
-      if (d > 7.5) this.startCombo(['leap']);
+      if (p.body.pos.y - b.pos.y > 0.6 && d < 8) this.startCombo(['leap']);
+      else if (d > 7.5) this.startCombo(['leap']);
       else if (d > 5) this.startCombo(Math.random() < 0.6 ? ['thrust'] : ['leap']);
       else this.startCombo(pick(this.phase === 1 ? P1 : P2));
     }
@@ -263,13 +264,17 @@ export class Boss extends Enemy {
         } else this.guardT = Math.min(this.guardT, 0.5);
         return 'blocked';
       }
-      if (k === 'heavy' || k === 'slam' || k === 'plunge') {
+      if (k === 'heavy' || k === 'pound') {
         this.addPosture(14);
         this.anim.playClip(BOSS.block, { blendIn: 0.03 });
         if (this.state === 'broken') return 'guardbreak';
         return 'blocked';
       }
-      if (k === 'kick') {
+      if (k === 'knife') {
+        this.addPosture(2);
+        return 'blocked';
+      }
+      if (k === 'art') {
         this.addPosture(10);
         if (this.posture > 55 && this.state !== 'broken') { this.setState('stagger'); this.hitstun = 0.5; this.anim.playClip(BOSS.parried, { blendIn: 0.03 }); }
         return 'hit';
